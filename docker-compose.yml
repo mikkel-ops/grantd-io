@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Local PostgreSQL for development (alternative to PlanetScale)
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: grantd
+      POSTGRES_PASSWORD: grantd_dev
+      POSTGRES_DB: grantd
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grantd"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # API (FastAPI)
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - ENVIRONMENT=development
+      - DATABASE_URL=postgresql://grantd:grantd_dev@db:5432/grantd
+      - COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - COGNITO_APP_CLIENT_ID=${COGNITO_APP_CLIENT_ID:-}
+      - COGNITO_REGION=eu-central-1
+      - AWS_REGION=eu-central-1
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./apps/api/src:/app/src:ro
+
+  # Web (Vite dev server)
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://localhost:8000/api/v1
+      - VITE_COGNITO_USER_POOL_ID=${COGNITO_USER_POOL_ID:-}
+      - VITE_COGNITO_CLIENT_ID=${COGNITO_APP_CLIENT_ID:-}
+    volumes:
+      - ./apps/web/src:/app/src:ro
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:

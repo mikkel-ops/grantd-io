@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "grantd-cli"
+version = "0.1.0"
+description = "Grantd CLI - Visual RBAC for data platforms"
+authors = ["Mikkel Gronning <mikkel@grantd.io>"]
+readme = "README.md"
+packages = [{include = "grantd_cli"}]
+
+[tool.poetry.scripts]
+grantd = "grantd_cli.main:app"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+typer = {extras = ["all"], version = "^0.15.0"}
+rich = "^13.9.0"
+httpx = "^0.28.0"
+pydantic = "^2.10.0"
+pydantic-settings = "^2.6.0"
+keyring = "^25.5.0"
+cryptography = "^44.0.0"
+snowflake-connector-python = "^3.12.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.0"
+ruff = "^0.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

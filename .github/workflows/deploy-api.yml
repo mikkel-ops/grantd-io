@@ -1,0 +1,74 @@
+name: Deploy API
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  AWS_REGION: eu-central-1
+
+jobs:
+  deploy:
+    name: Deploy API
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          version: latest
+
+      - name: Install dependencies
+        working-directory: apps/api
+        run: |
+          poetry export -f requirements.txt --output requirements.txt
+          pip install -r requirements.txt -t package/
+
+      - name: Package Lambda
+        working-directory: apps/api
+        run: |
+          cp -r src package/
+          cd package && zip -r ../lambda.zip .
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy to Lambda
+        working-directory: apps/api
+        run: |
+          ENV=${{ github.event.inputs.environment || 'dev' }}
+          aws lambda update-function-code \
+            --function-name grantd-api-$ENV \
+            --zip-file fileb://lambda.zip
+
+      - name: Wait for update
+        run: |
+          ENV=${{ github.event.inputs.environment || 'dev' }}
+          aws lambda wait function-updated \
+            --function-name grantd-api-$ENV
