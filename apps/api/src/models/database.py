@@ -138,6 +138,7 @@ class Connection(Base):
     platform = Column(Text, nullable=False)  # snowflake, databricks, bigquery, redshift
     connection_config = Column(JSONB, nullable=False)
     credential_param_path = Column(Text, nullable=False)
+    encrypted_credentials = Column(Text)  # For development mode - stores credentials directly
     sync_enabled = Column(Boolean, default=True)
     sync_interval_minutes = Column(Integer, default=60)
     last_sync_at = Column(DateTime(timezone=True))

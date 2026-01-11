@@ -69,6 +69,7 @@ class ConnectionResponse(ConnectionBase):
     sync_interval_minutes: int
     last_sync_at: datetime | None
     last_sync_status: str | None
+    last_sync_error: str | None
     created_at: datetime
 
     class Config:
@@ -84,11 +85,11 @@ class PlatformUserResponse(BaseModel):
     id: UUID
     connection_id: UUID
     name: str
-    email: str | None
-    display_name: str | None
-    disabled: bool
-    created_on: datetime | None
-    platform_data: dict[str, Any]
+    email: str | None = None
+    display_name: str | None = None
+    disabled: bool | None = False
+    created_on: datetime | None = None
+    platform_data: dict[str, Any] | None = None
     synced_at: datetime
 
     class Config:
@@ -99,11 +100,11 @@ class PlatformRoleResponse(BaseModel):
     id: UUID
     connection_id: UUID
     name: str
-    description: str | None
-    is_system: bool
-    member_count: int
-    grant_count: int
-    platform_data: dict[str, Any]
+    description: str | None = None
+    is_system: bool | None = False
+    member_count: int | None = 0
+    grant_count: int | None = 0
+    platform_data: dict[str, Any] | None = None
     synced_at: datetime
 
     class Config:

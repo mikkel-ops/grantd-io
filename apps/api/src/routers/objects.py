@@ -1,10 +1,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from pydantic import BaseModel
+from sqlalchemy import func, select
 
 from src.dependencies import CurrentOrgId, DbSession
 from src.models.database import (
+    Changeset,
     Connection,
     PlatformGrant,
     PlatformRole,
@@ -18,7 +20,76 @@ from src.models.schemas import (
     RoleAssignmentResponse,
 )
 
+
+class StatsResponse(BaseModel):
+    """Response schema for dashboard stats."""
+    connections: int
+    users: int
+    roles: int
+    grants: int
+    pending_changesets: int
+
 router = APIRouter(prefix="/objects")
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def get_stats(
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Get dashboard stats for the organization."""
+    # Get connection IDs for this org
+    connection_ids = db.execute(
+        select(Connection.id).where(Connection.org_id == UUID(org_id))
+    ).scalars().all()
+
+    connections_count = len(connection_ids)
+
+    if not connection_ids:
+        return StatsResponse(
+            connections=0,
+            users=0,
+            roles=0,
+            grants=0,
+            pending_changesets=0,
+        )
+
+    # Count users across all connections
+    users_count = db.execute(
+        select(func.count(PlatformUser.id)).where(
+            PlatformUser.connection_id.in_(connection_ids)
+        )
+    ).scalar() or 0
+
+    # Count roles across all connections
+    roles_count = db.execute(
+        select(func.count(PlatformRole.id)).where(
+            PlatformRole.connection_id.in_(connection_ids)
+        )
+    ).scalar() or 0
+
+    # Count grants across all connections
+    grants_count = db.execute(
+        select(func.count(PlatformGrant.id)).where(
+            PlatformGrant.connection_id.in_(connection_ids)
+        )
+    ).scalar() or 0
+
+    # Count pending changesets
+    pending_changesets = db.execute(
+        select(func.count(Changeset.id)).where(
+            Changeset.org_id == UUID(org_id),
+            Changeset.status.in_(["draft", "pending_review"]),
+        )
+    ).scalar() or 0
+
+    return StatsResponse(
+        connections=connections_count,
+        users=users_count,
+        roles=roles_count,
+        grants=grants_count,
+        pending_changesets=pending_changesets,
+    )
 
 
 def verify_connection_access(db, connection_id: UUID, org_id: str) -> Connection:

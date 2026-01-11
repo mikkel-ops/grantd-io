@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Database, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info } from 'lucide-react'
+import { Database, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info, RefreshCw, Settings, Clock } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 
@@ -15,8 +15,14 @@ interface Connection {
   id: string
   name: string
   platform: string
+  connection_config: {
+    account?: string
+    username?: string
+    warehouse?: string
+  }
   last_sync_at: string | null
   last_sync_status: string | null
+  last_sync_error: string | null
   sync_enabled: boolean
 }
 
@@ -93,6 +99,8 @@ export default function ConnectionsPage() {
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [loadingConnections, setLoadingConnections] = useState(true)
+  const [syncingConnectionId, setSyncingConnectionId] = useState<string | null>(null)
+  const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null)
 
   // Load existing connections on mount
   useEffect(() => {
@@ -204,6 +212,50 @@ export default function ConnectionsPage() {
     setFormData({ name: '', account: '', username: 'GRANTD_SERVICE', warehouse: '', privateKey: '' })
     setFormErrors({})
     setTestResult(null)
+  }
+
+  const handleSyncConnection = async (connectionId: string) => {
+    setSyncingConnectionId(connectionId)
+    try {
+      const token = await getToken()
+      await api.post(`/connections/${connectionId}/sync`, {}, token || undefined)
+      // Reload connections to get updated sync status
+      const data = await api.get<Connection[]>('/connections', token || undefined)
+      setConnections(data)
+    } catch (error) {
+      console.error('Failed to sync connection:', error)
+    } finally {
+      setSyncingConnectionId(null)
+    }
+  }
+
+  const handleDeleteConnection = async (connectionId: string) => {
+    if (!confirm('Are you sure you want to delete this connection? This will remove all synced data.')) {
+      return
+    }
+    try {
+      const token = await getToken()
+      await api.delete(`/connections/${connectionId}`, token || undefined)
+      setConnections(connections.filter(c => c.id !== connectionId))
+      setSelectedConnection(null)
+    } catch (error) {
+      console.error('Failed to delete connection:', error)
+    }
+  }
+
+  const formatLastSync = (dateStr: string | null) => {
+    if (!dateStr) return 'Never'
+    const date = new Date(dateStr)
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+    const diffHours = Math.floor(diffMs / 3600000)
+    const diffDays = Math.floor(diffMs / 86400000)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffHours < 24) return `${diffHours}h ago`
+    return `${diffDays}d ago`
   }
 
   return (
@@ -537,27 +589,165 @@ MIIEvgIBADANBgkqhkiG9w...
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {connection.last_sync_status === 'success' ? (
-                    <span className="flex items-center text-sm text-green-600">
-                      <CheckCircle className="h-4 w-4 mr-1" />
-                      Synced
+                <div className="flex items-center gap-4">
+                  {/* Sync status and last sync time */}
+                  <div className="flex items-center gap-3 text-sm">
+                    {connection.last_sync_status === 'success' ? (
+                      <span className="flex items-center text-green-600">
+                        <CheckCircle className="h-4 w-4 mr-1" />
+                        Synced
+                      </span>
+                    ) : connection.last_sync_status === 'failed' ? (
+                      <span className="flex items-center text-red-600">
+                        <XCircle className="h-4 w-4 mr-1" />
+                        Failed
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">Not synced</span>
+                    )}
+                    <span className="flex items-center text-muted-foreground">
+                      <Clock className="h-4 w-4 mr-1" />
+                      {formatLastSync(connection.last_sync_at)}
                     </span>
-                  ) : connection.last_sync_status === 'failed' ? (
-                    <span className="flex items-center text-sm text-red-600">
-                      <XCircle className="h-4 w-4 mr-1" />
-                      Failed
-                    </span>
-                  ) : (
-                    <span className="text-sm text-muted-foreground">Not synced</span>
-                  )}
-                  <Button variant="outline" size="sm">
-                    Configure
-                  </Button>
+                  </div>
+                  {/* Action buttons */}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleSyncConnection(connection.id)}
+                      disabled={syncingConnectionId === connection.id}
+                    >
+                      {syncingConnectionId === connection.id ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-1" />
+                          Sync
+                        </>
+                      )}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSelectedConnection(connection)}
+                    >
+                      <Settings className="h-4 w-4 mr-1" />
+                      Configure
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>
           ))}
+
+          {/* Configuration Panel */}
+          {selectedConnection && (
+            <Card className="mt-4">
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <div>
+                  <CardTitle className="text-lg">Configure: {selectedConnection.name}</CardTitle>
+                  <CardDescription>Connection details and settings</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setSelectedConnection(null)}
+                >
+                  <XCircle className="h-4 w-4" />
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Connection Details */}
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="text-muted-foreground">Account</p>
+                    <p className="font-medium font-mono">{selectedConnection.connection_config?.account || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Username</p>
+                    <p className="font-medium font-mono">{selectedConnection.connection_config?.username || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Warehouse</p>
+                    <p className="font-medium font-mono">{selectedConnection.connection_config?.warehouse || '-'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Platform</p>
+                    <p className="font-medium">{selectedConnection.platform}</p>
+                  </div>
+                </div>
+
+                {/* Sync Status */}
+                <div className="grid grid-cols-2 gap-4 text-sm pt-4 border-t">
+                  <div>
+                    <p className="text-muted-foreground">Sync Status</p>
+                    <p className={`font-medium ${
+                      selectedConnection.last_sync_status === 'success' ? 'text-green-600' :
+                      selectedConnection.last_sync_status === 'failed' ? 'text-red-600' : ''
+                    }`}>
+                      {selectedConnection.last_sync_status === 'success' ? 'Success' :
+                       selectedConnection.last_sync_status === 'failed' ? 'Failed' : 'Never synced'}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Last Sync</p>
+                    <p className="font-medium">{formatLastSync(selectedConnection.last_sync_at)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Auto-Sync</p>
+                    <p className="font-medium">{selectedConnection.sync_enabled ? 'Enabled' : 'Disabled'}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground">Connection ID</p>
+                    <p className="font-mono text-xs">{selectedConnection.id}</p>
+                  </div>
+                </div>
+
+                {/* Error message if sync failed */}
+                {selectedConnection.last_sync_status === 'failed' && selectedConnection.last_sync_error && (
+                  <Alert variant="destructive">
+                    <XCircle className="h-4 w-4" />
+                    <AlertTitle>Sync Error</AlertTitle>
+                    <AlertDescription className="text-xs">
+                      {selectedConnection.last_sync_error}
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <div className="flex gap-2 pt-2 border-t">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleSyncConnection(selectedConnection.id)}
+                    disabled={syncingConnectionId === selectedConnection.id}
+                  >
+                    {syncingConnectionId === selectedConnection.id ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        Syncing...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-1" />
+                        Sync Now
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 hover:text-red-700"
+                    onClick={() => handleDeleteConnection(selectedConnection.id)}
+                  >
+                    Delete Connection
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
       ) : (
         <Card className="border-dashed">
