@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -92,6 +92,25 @@ export default function ConnectionsPage() {
     privateKey: '',
   })
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
+  const [loadingConnections, setLoadingConnections] = useState(true)
+
+  // Load existing connections on mount
+  useEffect(() => {
+    const loadConnections = async () => {
+      try {
+        const token = await getToken()
+        if (token) {
+          const data = await api.get<Connection[]>('/connections', token)
+          setConnections(data)
+        }
+      } catch (error) {
+        console.error('Failed to load connections:', error)
+      } finally {
+        setLoadingConnections(false)
+      }
+    }
+    loadConnections()
+  }, [getToken])
 
   const handleCopySQL = async () => {
     await navigator.clipboard.writeText(SNOWFLAKE_SETUP_SQL)
@@ -494,6 +513,12 @@ MIIEvgIBADANBgkqhkiG9w...
                 </form>
               </div>
             ) : null}
+          </CardContent>
+        </Card>
+      ) : loadingConnections ? (
+        <Card>
+          <CardContent className="flex items-center justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </CardContent>
         </Card>
       ) : connections.length > 0 ? (
