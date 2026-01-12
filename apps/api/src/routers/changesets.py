@@ -200,3 +200,74 @@ async def mark_changeset_applied(
     db.commit()
 
     return {"status": "applied"}
+
+
+@router.post("/{changeset_id}/request-review")
+async def request_changeset_review(
+    changeset_id: UUID,
+    org_id: CurrentOrgId,
+    user: CurrentUser,
+    db: DbSession,
+):
+    """Request review for a changeset."""
+    changeset = db.execute(
+        select(Changeset).where(
+            Changeset.id == changeset_id,
+            Changeset.org_id == UUID(org_id),
+        )
+    ).scalar_one_or_none()
+
+    if not changeset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Changeset not found",
+        )
+
+    if changeset.status != "draft":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot request review for changeset in status: {changeset.status}",
+        )
+
+    changeset.status = "pending_review"
+    db.commit()
+
+    return {"status": "pending_review"}
+
+
+@router.delete("/{changeset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_changeset(
+    changeset_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Delete a changeset."""
+    changeset = db.execute(
+        select(Changeset).where(
+            Changeset.id == changeset_id,
+            Changeset.org_id == UUID(org_id),
+        )
+    ).scalar_one_or_none()
+
+    if not changeset:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Changeset not found",
+        )
+
+    if changeset.status not in ["draft", "pending_review"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot delete changeset in status: {changeset.status}",
+        )
+
+    # Delete associated changes first
+    db.execute(
+        select(Change).where(Change.changeset_id == changeset_id)
+    )
+    from sqlalchemy import delete
+    db.execute(delete(Change).where(Change.changeset_id == changeset_id))
+    db.delete(changeset)
+    db.commit()
+
+    return None

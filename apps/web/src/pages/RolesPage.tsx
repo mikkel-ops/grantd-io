@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Shield, Loader2, Search, Users, Key, Database, ChevronRight } from 'lucide-react'
+import { Shield, Loader2, Search, Users, Key, Database, ChevronRight, Wand2, Pencil } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { Input } from '@/components/ui/input'
@@ -56,8 +56,9 @@ export default function RolesPage() {
           const data = await api.get<Connection[]>('/connections', token)
           setConnections(data)
           // Auto-select first connection if available
-          if (data.length > 0 && !selectedConnectionId) {
-            setSelectedConnectionId(data[0].id)
+          const firstConnection = data[0]
+          if (firstConnection && !selectedConnectionId) {
+            setSelectedConnectionId(firstConnection.id)
           }
         }
       } catch (error) {
@@ -180,11 +181,20 @@ export default function RolesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Roles</h1>
-        <p className="text-muted-foreground">
-          View and manage roles across your connected platforms
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Roles</h1>
+          <p className="text-muted-foreground">
+            View and manage roles across your connected platforms
+          </p>
+        </div>
+        <Link
+          to="/roles/designer"
+          className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        >
+          <Wand2 className="h-4 w-4" />
+          Design New Role
+        </Link>
       </div>
 
       {/* Connection selector and search */}
@@ -287,6 +297,14 @@ export default function RolesPage() {
                         <Key className="h-4 w-4 mr-1" />
                         {role.grant_count} grants
                       </span>
+                      <Link
+                        to={`/roles/designer?connection_id=${selectedConnectionId}&edit_role=${encodeURIComponent(role.name)}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs rounded bg-muted hover:bg-primary hover:text-primary-foreground transition-colors"
+                      >
+                        <Pencil className="h-3 w-3" />
+                        Edit
+                      </Link>
                       <ChevronRight className={`h-4 w-4 text-muted-foreground transition-transform ${expandedRole === role.name ? 'rotate-90' : ''}`} />
                     </div>
                   </div>

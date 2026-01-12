@@ -96,12 +96,13 @@ export default function UserAccessPage() {
           )
           setAccessData(data)
           // Auto-expand first database
-          if (data.databases.length > 0) {
-            setExpandedDbs(new Set([data.databases[0].name]))
+          const firstDb = data.databases[0]
+          if (firstDb) {
+            setExpandedDbs(new Set([firstDb.name]))
             // Auto-expand first schema
-            const firstSchemaName = Object.keys(data.databases[0].schemas)[0]
+            const firstSchemaName = Object.keys(firstDb.schemas)[0]
             if (firstSchemaName) {
-              setExpandedSchemas(new Set([`${data.databases[0].name}.${firstSchemaName}`]))
+              setExpandedSchemas(new Set([`${firstDb.name}.${firstSchemaName}`]))
             }
           }
         }

@@ -42,8 +42,9 @@ export default function UsersPage() {
           const data = await api.get<Connection[]>('/connections', token)
           setConnections(data)
           // Auto-select first connection if available
-          if (data.length > 0 && !selectedConnectionId) {
-            setSelectedConnectionId(data[0].id)
+          const firstConn = data[0]
+          if (firstConn && !selectedConnectionId) {
+            setSelectedConnectionId(firstConn.id)
           }
         }
       } catch (error) {

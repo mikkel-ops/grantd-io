@@ -10,6 +10,7 @@ import {
   Settings,
   LogOut,
   Menu,
+  Wand2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -18,6 +19,7 @@ const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Connections', href: '/connections', icon: Database },
   { name: 'Roles', href: '/roles', icon: Shield },
+  { name: 'Role Designer', href: '/roles/designer', icon: Wand2 },
   { name: 'Users', href: '/users', icon: Users },
   { name: 'Changesets', href: '/changesets', icon: FileText },
   { name: 'Settings', href: '/settings', icon: Settings },

@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, select
+from sqlalchemy import func, select, distinct
 
 from src.dependencies import CurrentOrgId, DbSession
 from src.models.database import (
@@ -475,3 +475,410 @@ async def get_user_access(
             total_views=total_views,
         ),
     )
+
+
+# ============================================================================
+# ROLE DESIGNER ENDPOINTS
+# ============================================================================
+
+
+class DatabaseInfo(BaseModel):
+    """Database info for privilege selection."""
+    name: str
+    schemas: list[str]
+    is_imported: bool = False  # True for shared/imported databases
+
+
+class RoleDesignerData(BaseModel):
+    """Data for the role designer UI."""
+    databases: list[DatabaseInfo]
+    roles: list[str]
+    users: list[str]
+
+
+class PrivilegeSpec(BaseModel):
+    """A privilege specification for role design."""
+    privilege: str
+    object_type: str
+    object_name: str
+    is_imported_database: bool = False
+
+
+class RoleDesignRequest(BaseModel):
+    """Request to create a new role design."""
+    role_name: str
+    description: str | None = None
+    inherit_from_roles: list[str] = []
+    privileges: list[PrivilegeSpec] = []
+    assign_to_users: list[str] = []
+    assign_to_roles: list[str] = []
+    # Edit mode fields - original state for diff calculation
+    is_edit_mode: bool = False
+    original_inherited_roles: list[str] = []
+    original_privileges: list[PrivilegeSpec] = []
+    original_assigned_users: list[str] = []
+    original_assigned_roles: list[str] = []
+
+
+class SqlPreviewResponse(BaseModel):
+    """SQL preview for role design."""
+    statements: list[str]
+    summary: str
+
+
+@router.get("/role-designer/data", response_model=RoleDesignerData)
+async def get_role_designer_data(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Get data needed for the role designer (databases, schemas, existing roles, users)."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get unique databases from grants
+    db_query = db.execute(
+        select(distinct(PlatformGrant.object_database))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_database.isnot(None),
+        )
+    ).scalars().all()
+
+    # Check for imported databases by looking for IMPORTED PRIVILEGES grants
+    imported_dbs_query = db.execute(
+        select(distinct(PlatformGrant.object_database))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.privilege == "IMPORTED PRIVILEGES",
+        )
+    ).scalars().all()
+    imported_db_names = set(imported_dbs_query)
+
+    # Get schemas for each database
+    databases = []
+    for db_name in sorted(db_query):
+        if db_name:
+            schema_query = db.execute(
+                select(distinct(PlatformGrant.object_schema))
+                .where(
+                    PlatformGrant.connection_id == connection_id,
+                    PlatformGrant.object_database == db_name,
+                    PlatformGrant.object_schema.isnot(None),
+                )
+            ).scalars().all()
+
+            # Check if this is an imported/shared database
+            # Detection: has IMPORTED PRIVILEGES grant, or known Snowflake sample data
+            is_imported = (
+                db_name in imported_db_names
+                or db_name.upper() in ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+            )
+
+            databases.append(DatabaseInfo(
+                name=db_name,
+                schemas=sorted([s for s in schema_query if s]),
+                is_imported=is_imported,
+            ))
+
+    # Get existing roles
+    roles = db.execute(
+        select(PlatformRole.name)
+        .where(PlatformRole.connection_id == connection_id)
+        .order_by(PlatformRole.name)
+    ).scalars().all()
+
+    # Get existing users
+    users = db.execute(
+        select(PlatformUser.name)
+        .where(PlatformUser.connection_id == connection_id)
+        .order_by(PlatformUser.name)
+    ).scalars().all()
+
+    return RoleDesignerData(
+        databases=databases,
+        roles=list(roles),
+        users=list(users),
+    )
+
+
+class RolePrivilegesResponse(BaseModel):
+    """Response with a role's current privileges and assignments."""
+    role_name: str
+    description: str | None = None
+    inherited_roles: list[str]  # Roles this role inherits from (has been granted)
+    privileges: list[PrivilegeSpec]
+    assigned_to_users: list[str]  # Users who have this role
+    assigned_to_roles: list[str]  # Roles this role is granted to (parent roles)
+
+
+@router.get("/roles/{role_name}/privileges", response_model=RolePrivilegesResponse)
+async def get_role_privileges(
+    role_name: str,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Get a role's current privileges, inherited roles, and assignments for editing."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get the role details
+    role = db.execute(
+        select(PlatformRole).where(
+            PlatformRole.connection_id == connection_id,
+            PlatformRole.name == role_name,
+        )
+    ).scalar_one_or_none()
+
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
+        )
+
+    # Get roles that this role inherits from (roles granted TO this role)
+    inherited_roles_query = db.execute(
+        select(RoleAssignment.role_name).where(
+            RoleAssignment.connection_id == connection_id,
+            RoleAssignment.assignee_type == "ROLE",
+            RoleAssignment.assignee_name == role_name,
+        )
+    ).scalars().all()
+
+    # Get users who have this role
+    assigned_users_query = db.execute(
+        select(RoleAssignment.assignee_name).where(
+            RoleAssignment.connection_id == connection_id,
+            RoleAssignment.role_name == role_name,
+            RoleAssignment.assignee_type == "USER",
+        )
+    ).scalars().all()
+
+    # Get roles this role is granted to (parent roles in hierarchy)
+    assigned_roles_query = db.execute(
+        select(RoleAssignment.assignee_name).where(
+            RoleAssignment.connection_id == connection_id,
+            RoleAssignment.role_name == role_name,
+            RoleAssignment.assignee_type == "ROLE",
+        )
+    ).scalars().all()
+
+    # Get direct grants for this role
+    grants = db.execute(
+        select(PlatformGrant).where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.grantee_name == role_name,
+            PlatformGrant.grantee_type == "ROLE",
+        )
+    ).scalars().all()
+
+    # Check for imported databases
+    imported_dbs_query = db.execute(
+        select(distinct(PlatformGrant.object_database))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.privilege == "IMPORTED PRIVILEGES",
+        )
+    ).scalars().all()
+    imported_db_names = set(imported_dbs_query)
+
+    # Convert grants to PrivilegeSpec format
+    privileges = []
+    for grant in grants:
+        # Determine object type and name
+        obj_type = grant.object_type.upper() if grant.object_type else ""
+
+        # Build object name based on type
+        if obj_type == "DATABASE":
+            obj_name = grant.object_database or grant.object_name or ""
+        elif obj_type == "SCHEMA":
+            obj_name = f"{grant.object_database}.{grant.object_schema}" if grant.object_database and grant.object_schema else grant.object_name or ""
+        elif obj_type in ("TABLE", "VIEW"):
+            if grant.object_database and grant.object_schema and grant.object_name:
+                obj_name = f"{grant.object_database}.{grant.object_schema}.{grant.object_name}"
+            else:
+                obj_name = grant.object_name or ""
+        else:
+            obj_name = grant.object_name or ""
+
+        # Check if this is an imported database privilege
+        is_imported = (
+            obj_type == "DATABASE"
+            and grant.privilege == "IMPORTED PRIVILEGES"
+        ) or (
+            grant.object_database in imported_db_names
+            or (grant.object_database and grant.object_database.upper() in ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE"))
+        )
+
+        privileges.append(PrivilegeSpec(
+            privilege=grant.privilege,
+            object_type=obj_type,
+            object_name=obj_name,
+            is_imported_database=is_imported,
+        ))
+
+    # Get description from platform_data if available
+    description = None
+    if role.platform_data and isinstance(role.platform_data, dict):
+        description = role.platform_data.get("comment") or role.platform_data.get("description")
+
+    return RolePrivilegesResponse(
+        role_name=role_name,
+        description=description,
+        inherited_roles=list(inherited_roles_query),
+        privileges=privileges,
+        assigned_to_users=list(assigned_users_query),
+        assigned_to_roles=list(assigned_roles_query),
+    )
+
+
+@router.post("/role-designer/preview", response_model=SqlPreviewResponse)
+async def preview_role_sql(
+    design: RoleDesignRequest,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Generate SQL preview for a role design."""
+    verify_connection_access(db, connection_id, org_id)
+
+    statements = []
+
+    if design.is_edit_mode:
+        # EDIT MODE: Generate diff-based SQL (grants and revokes)
+
+        # Helper to create privilege key for comparison
+        def priv_key(p: PrivilegeSpec) -> str:
+            return f"{p.privilege}|{p.object_type}|{p.object_name}"
+
+        original_inherited_set = set(design.original_inherited_roles)
+        new_inherited_set = set(design.inherit_from_roles)
+        original_priv_set = {priv_key(p) for p in design.original_privileges}
+        new_priv_set = {priv_key(p) for p in design.privileges}
+        original_user_set = set(design.original_assigned_users)
+        new_user_set = set(design.assign_to_users)
+        original_role_set = set(design.original_assigned_roles)
+        new_role_set = set(design.assign_to_roles)
+
+        grants_count = 0
+        revokes_count = 0
+
+        # Inherited roles to grant
+        for parent_role in design.inherit_from_roles:
+            if parent_role not in original_inherited_set:
+                statements.append(f"GRANT ROLE {parent_role} TO ROLE {design.role_name};")
+                grants_count += 1
+
+        # Inherited roles to revoke
+        for parent_role in design.original_inherited_roles:
+            if parent_role not in new_inherited_set:
+                statements.append(f"REVOKE ROLE {parent_role} FROM ROLE {design.role_name};")
+                revokes_count += 1
+
+        # Privileges to grant
+        for priv in design.privileges:
+            if priv_key(priv) not in original_priv_set:
+                if priv.is_imported_database and priv.object_type.upper() == "DATABASE":
+                    statements.append(
+                        f"GRANT IMPORTED PRIVILEGES ON DATABASE {priv.object_name} TO ROLE {design.role_name};"
+                    )
+                else:
+                    statements.append(
+                        f"GRANT {priv.privilege} ON {priv.object_type} {priv.object_name} TO ROLE {design.role_name};"
+                    )
+                grants_count += 1
+
+        # Privileges to revoke
+        for priv in design.original_privileges:
+            if priv_key(priv) not in new_priv_set:
+                if priv.is_imported_database and priv.object_type.upper() == "DATABASE":
+                    statements.append(
+                        f"REVOKE IMPORTED PRIVILEGES ON DATABASE {priv.object_name} FROM ROLE {design.role_name};"
+                    )
+                else:
+                    statements.append(
+                        f"REVOKE {priv.privilege} ON {priv.object_type} {priv.object_name} FROM ROLE {design.role_name};"
+                    )
+                revokes_count += 1
+
+        # User assignments to grant
+        for user in design.assign_to_users:
+            if user not in original_user_set:
+                statements.append(f"GRANT ROLE {design.role_name} TO USER {user};")
+                grants_count += 1
+
+        # User assignments to revoke
+        for user in design.original_assigned_users:
+            if user not in new_user_set:
+                statements.append(f"REVOKE ROLE {design.role_name} FROM USER {user};")
+                revokes_count += 1
+
+        # Role assignments to grant
+        for role in design.assign_to_roles:
+            if role not in original_role_set:
+                statements.append(f"GRANT ROLE {design.role_name} TO ROLE {role};")
+                grants_count += 1
+
+        # Role assignments to revoke
+        for role in design.original_assigned_roles:
+            if role not in new_role_set:
+                statements.append(f"REVOKE ROLE {design.role_name} FROM ROLE {role};")
+                revokes_count += 1
+
+        if not statements:
+            statements.append(f"-- No changes to role {design.role_name}")
+
+        summary = f"Modifies role {design.role_name}"
+        parts = []
+        if grants_count > 0:
+            parts.append(f"{grants_count} grant(s)")
+        if revokes_count > 0:
+            parts.append(f"{revokes_count} revoke(s)")
+        if parts:
+            summary += f" with {' and '.join(parts)}"
+        else:
+            summary = f"No changes to role {design.role_name}"
+
+    else:
+        # CREATE MODE: Generate all grants
+
+        # 1. Create the role
+        comment = design.description or ""
+        create_sql = f"CREATE ROLE IF NOT EXISTS {design.role_name}"
+        if comment:
+            create_sql += f" COMMENT = '{comment}'"
+        create_sql += ";"
+        statements.append(create_sql)
+
+        # 2. Grant inherited roles to the new role
+        for parent_role in design.inherit_from_roles:
+            statements.append(f"GRANT ROLE {parent_role} TO ROLE {design.role_name};")
+
+        # 3. Grant privileges
+        for priv in design.privileges:
+            # For imported databases, use IMPORTED PRIVILEGES syntax
+            if priv.is_imported_database and priv.object_type.upper() == "DATABASE":
+                statements.append(
+                    f"GRANT IMPORTED PRIVILEGES ON DATABASE {priv.object_name} TO ROLE {design.role_name};"
+                )
+            else:
+                statements.append(
+                    f"GRANT {priv.privilege} ON {priv.object_type} {priv.object_name} TO ROLE {design.role_name};"
+                )
+
+        # 4. Assign role to users
+        for user in design.assign_to_users:
+            statements.append(f"GRANT ROLE {design.role_name} TO USER {user};")
+
+        # 5. Assign role to other roles
+        for role in design.assign_to_roles:
+            statements.append(f"GRANT ROLE {design.role_name} TO ROLE {role};")
+
+        summary = f"Creates role {design.role_name}"
+        if design.inherit_from_roles:
+            summary += f" inheriting from {len(design.inherit_from_roles)} role(s)"
+        if design.privileges:
+            summary += f" with {len(design.privileges)} privilege(s)"
+        if design.assign_to_users:
+            summary += f", assigned to {len(design.assign_to_users)} user(s)"
+
+    return SqlPreviewResponse(statements=statements, summary=summary)

@@ -50,6 +50,12 @@ def _generate_snowflake_sql(
             on_type = details.get("on_type")
             on_name = details.get("on_name")
             with_grant = details.get("with_grant_option", False)
+            is_imported = details.get("is_imported_database", False)
+
+            # For imported/shared databases, use IMPORTED PRIVILEGES
+            if is_imported and on_type.upper() == "DATABASE":
+                return f"GRANT IMPORTED PRIVILEGES ON DATABASE {on_name} TO ROLE {object_name};"
+
             sql = f"GRANT {privilege} ON {on_type} {on_name} TO ROLE {object_name}"
             if with_grant:
                 sql += " WITH GRANT OPTION"

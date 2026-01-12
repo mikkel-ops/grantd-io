@@ -8,6 +8,7 @@ import SignupPage from '@/pages/SignupPage'
 import DashboardPage from '@/pages/DashboardPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import RolesPage from '@/pages/RolesPage'
+import RoleDesignerPage from '@/pages/RoleDesignerPage'
 import UsersPage from '@/pages/UsersPage'
 import UserAccessPage from '@/pages/UserAccessPage'
 import ChangesetsPage from '@/pages/ChangesetsPage'
@@ -54,6 +55,7 @@ function App() {
           <Route index element={<DashboardPage />} />
           <Route path="connections" element={<ConnectionsPage />} />
           <Route path="roles" element={<RolesPage />} />
+          <Route path="roles/designer" element={<RoleDesignerPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="users/:userName/access" element={<UserAccessPage />} />
           <Route path="changesets" element={<ChangesetsPage />} />
