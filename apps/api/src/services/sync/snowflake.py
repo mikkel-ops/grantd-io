@@ -179,7 +179,7 @@ class SnowflakeConnector(PlatformConnector):
                     assignments.append(
                         RoleAssignment(
                             role_name=role,
-                            assignee_type=row.get("granted_to", "").lower(),
+                            assignee_type=row.get("granted_to", "").upper(),
                             assignee_name=row.get("grantee_name", ""),
                             assigned_by=row.get("granted_by"),
                             created_on=str(row.get("created_on")) if row.get("created_on") else None,
@@ -191,6 +191,37 @@ class SnowflakeConnector(PlatformConnector):
 
         cursor.close()
         return assignments
+
+    def _parse_object_name(self, full_name: str | None, object_type: str) -> tuple[str | None, str | None, str | None]:
+        """Parse a fully qualified object name into (database, schema, object_name).
+
+        Snowflake object names can be:
+        - DATABASE: just the db name
+        - SCHEMA: DB.SCHEMA
+        - TABLE/VIEW: DB.SCHEMA.TABLE
+        - WAREHOUSE/ROLE etc: just the name
+        """
+        if not full_name:
+            return None, None, None
+
+        parts = full_name.split(".")
+        obj_type_upper = object_type.upper()
+
+        if obj_type_upper == "DATABASE":
+            return parts[0] if parts else None, None, parts[0] if parts else None
+        elif obj_type_upper == "SCHEMA":
+            if len(parts) >= 2:
+                return parts[0], parts[1], parts[1]
+            return None, parts[0] if parts else None, parts[0] if parts else None
+        elif obj_type_upper in ("TABLE", "VIEW", "STAGE", "FILE_FORMAT", "SEQUENCE", "STREAM", "TASK", "PROCEDURE", "FUNCTION"):
+            if len(parts) >= 3:
+                return parts[0], parts[1], parts[2]
+            elif len(parts) == 2:
+                return None, parts[0], parts[1]
+            return None, None, parts[0] if parts else None
+        else:
+            # For account-level objects like WAREHOUSE, ROLE, USER, etc.
+            return None, None, full_name
 
     async def sync_grants(self) -> list[PlatformGrant]:
         conn = self._get_connection()
@@ -207,12 +238,18 @@ class SnowflakeConnector(PlatformConnector):
             try:
                 cursor.execute(f"SHOW GRANTS TO ROLE {role}")
                 for row in cursor.fetchall():
+                    full_name = row.get("name")
+                    object_type = row.get("granted_on", "")
+                    db_name, schema_name, obj_name = self._parse_object_name(full_name, object_type)
+
                     grants.append(
                         PlatformGrant(
                             privilege=row.get("privilege", ""),
-                            object_type=row.get("granted_on", ""),
-                            object_name=row.get("name"),
-                            grantee_type="role",
+                            object_type=object_type,
+                            object_name=obj_name,
+                            object_database=db_name,
+                            object_schema=schema_name,
+                            grantee_type="ROLE",
                             grantee_name=role,
                             with_grant_option=row.get("grant_option", "false") == "true",
                             granted_by=row.get("granted_by"),

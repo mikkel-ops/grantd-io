@@ -554,6 +554,8 @@ def _replace_grants(db, connection_id: UUID, grants: list):
                 privilege=grant.privilege,
                 object_type=grant.object_type,
                 object_name=grant.object_name,
+                object_database=grant.object_database,
+                object_schema=grant.object_schema,
                 grantee_type=grant.grantee_type,
                 grantee_name=grant.grantee_name,
                 with_grant_option=grant.with_grant_option,

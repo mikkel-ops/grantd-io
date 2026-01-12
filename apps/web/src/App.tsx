@@ -9,6 +9,7 @@ import DashboardPage from '@/pages/DashboardPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import RolesPage from '@/pages/RolesPage'
 import UsersPage from '@/pages/UsersPage'
+import UserAccessPage from '@/pages/UserAccessPage'
 import ChangesetsPage from '@/pages/ChangesetsPage'
 import SettingsPage from '@/pages/SettingsPage'
 
@@ -54,6 +55,7 @@ function App() {
           <Route path="connections" element={<ConnectionsPage />} />
           <Route path="roles" element={<RolesPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="users/:userName/access" element={<UserAccessPage />} />
           <Route path="changesets" element={<ChangesetsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

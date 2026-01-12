@@ -52,6 +52,8 @@ class PlatformGrant:
     grantee_name: str
     with_grant_option: bool = False
     granted_by: str | None = None
+    object_database: str | None = None
+    object_schema: str | None = None
     platform_data: dict[str, Any] = field(default_factory=dict)
 
 

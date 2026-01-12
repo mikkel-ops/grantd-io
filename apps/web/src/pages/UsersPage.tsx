@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, Loader2, Search, UserCircle, CheckCircle, XCircle, Database } from 'lucide-react'
+import { Users, Loader2, Search, UserCircle, CheckCircle, XCircle, Database, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { Input } from '@/components/ui/input'
@@ -205,9 +205,10 @@ export default function UsersPage() {
           <CardContent>
             <div className="space-y-2">
               {users.map((user) => (
-                <div
+                <Link
                   key={user.id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50"
+                  to={`/users/${encodeURIComponent(user.name)}/access?connection_id=${selectedConnectionId}`}
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -235,8 +236,9 @@ export default function UsersPage() {
                     <span className="text-muted-foreground">
                       Created: {formatDate(user.created_on)}
                     </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           </CardContent>

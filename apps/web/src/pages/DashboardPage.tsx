@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Database, Users, Shield, FileText, AlertTriangle, CheckCircle, XCircle, Loader2, Snowflake, Clock, Key } from 'lucide-react'
+import { Database, Users, Shield, FileText, AlertTriangle, CheckCircle, XCircle, Loader2, Snowflake, Clock, Key, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { Link } from 'react-router-dom'
@@ -142,9 +142,10 @@ export default function DashboardPage() {
           <CardContent>
             <div className="space-y-3">
               {connections.map((connection) => (
-                <div
+                <Link
                   key={connection.id}
-                  className="flex items-center justify-between p-3 border rounded-lg"
+                  to="/connections"
+                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer group"
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
@@ -175,17 +176,10 @@ export default function DashboardPage() {
                       <Clock className="h-4 w-4 mr-1" />
                       {formatLastSync(connection.last_sync_at)}
                     </span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
                   </div>
-                </div>
+                </Link>
               ))}
-            </div>
-            <div className="mt-4 pt-4 border-t">
-              <Link
-                to="/connections"
-                className="text-sm text-primary hover:underline"
-              >
-                Manage connections →
-              </Link>
             </div>
           </CardContent>
         </Card>
