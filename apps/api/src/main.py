@@ -1,13 +1,20 @@
+import logging
+import traceback
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from mangum import Mangum
 
 from src.config import get_settings
 from src.routers import auth, changesets, connections, objects, organizations, sync
 
 settings = get_settings()
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
@@ -34,6 +41,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Global exception handler to ensure errors are logged and CORS headers are included
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Handle all unhandled exceptions with proper logging and CORS."""
+    logger.error(f"Unhandled exception for {request.method} {request.url}:")
+    logger.error(traceback.format_exc())
+
+    # Return a proper JSON response with error details
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "error": str(exc) if settings.debug else "An unexpected error occurred",
+        },
+    )
+
 
 # Include routers
 app.include_router(auth.router, prefix=settings.api_prefix, tags=["auth"])

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Database, Users, Shield, FileText, AlertTriangle, CheckCircle, XCircle, Loader2, Snowflake, Clock, Key, ChevronRight } from 'lucide-react'
+import { Building2, Users, Shield, FileText, AlertTriangle, CheckCircle, XCircle, Loader2, Snowflake, Clock, Key, ChevronRight } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { Link } from 'react-router-dom'
@@ -66,10 +66,10 @@ export default function DashboardPage() {
 
   const statCards = [
     {
-      name: 'Connections',
+      name: 'Accounts',
       value: stats?.connections.toString() || '0',
-      description: 'Active platform connections',
-      icon: Database,
+      description: 'Connected platform accounts',
+      icon: Building2,
       href: '/connections',
     },
     {
@@ -115,28 +115,28 @@ export default function DashboardPage() {
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <div className="rounded-full bg-muted p-3 mb-4">
-              <Database className="h-6 w-6 text-muted-foreground" />
+              <Building2 className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">No connections yet</h3>
+            <h3 className="text-lg font-semibold mb-2">No accounts connected</h3>
             <p className="text-muted-foreground text-center max-w-sm mb-4">
-              Connect your first data platform to start managing access control
+              Connect your first Snowflake account to start managing access control
               visually.
             </p>
             <Link
               to="/connections"
               className="inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
-              Add Connection
+              Add Account
             </Link>
           </CardContent>
         </Card>
       ) : (
-        /* Connection summary */
+        /* Account summary */
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5" />
-              Platform Connections
+              <Building2 className="h-5 w-5" />
+              Connected Accounts
             </CardTitle>
           </CardHeader>
           <CardContent>

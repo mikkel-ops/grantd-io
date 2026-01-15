@@ -9,7 +9,10 @@ import DashboardPage from '@/pages/DashboardPage'
 import ConnectionsPage from '@/pages/ConnectionsPage'
 import RolesPage from '@/pages/RolesPage'
 import RoleDesignerPage from '@/pages/RoleDesignerPage'
+import WarehousesPage from '@/pages/WarehousesPage'
+import WarehouseDesignerPage from '@/pages/WarehouseDesignerPage'
 import UsersPage from '@/pages/UsersPage'
+import UserDesignerPage from '@/pages/UserDesignerPage'
 import UserAccessPage from '@/pages/UserAccessPage'
 import ChangesetsPage from '@/pages/ChangesetsPage'
 import SettingsPage from '@/pages/SettingsPage'
@@ -56,7 +59,10 @@ function App() {
           <Route path="connections" element={<ConnectionsPage />} />
           <Route path="roles" element={<RolesPage />} />
           <Route path="roles/designer" element={<RoleDesignerPage />} />
+          <Route path="warehouses" element={<WarehousesPage />} />
+          <Route path="warehouses/designer" element={<WarehouseDesignerPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="users/designer" element={<UserDesignerPage />} />
           <Route path="users/:userName/access" element={<UserAccessPage />} />
           <Route path="changesets" element={<ChangesetsPage />} />
           <Route path="settings" element={<SettingsPage />} />

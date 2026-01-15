@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Users, Loader2, Search, UserCircle, CheckCircle, XCircle, Database, ChevronRight } from 'lucide-react'
+import { Users, Loader2, Search, UserCircle, CheckCircle, XCircle, Database, ChevronRight, Plus } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import { Input } from '@/components/ui/input'
-import { Link } from 'react-router-dom'
+import { Button } from '@/components/ui/button'
+import { Link, useNavigate } from 'react-router-dom'
 
 interface Connection {
   id: string
@@ -26,6 +27,7 @@ interface PlatformUser {
 
 export default function UsersPage() {
   const { getToken } = useAuth()
+  const navigate = useNavigate()
   const [connections, setConnections] = useState<Connection[]>([])
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(null)
   const [users, setUsers] = useState<PlatformUser[]>([])
@@ -140,11 +142,17 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Users</h1>
-        <p className="text-muted-foreground">
-          View and manage users across your connected platforms
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Users</h1>
+          <p className="text-muted-foreground">
+            View and manage users across your connected platforms
+          </p>
+        </div>
+        <Button onClick={() => navigate(`/users/designer?connection_id=${selectedConnectionId}`)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Create User
+        </Button>
       </div>
 
       {/* Connection selector and search */}
@@ -185,9 +193,13 @@ export default function UsersPage() {
               <Users className="h-6 w-6 text-muted-foreground" />
             </div>
             <h3 className="text-lg font-semibold mb-2">No users synced</h3>
-            <p className="text-muted-foreground text-center max-w-sm">
-              Run a sync on your connection to see users here.
+            <p className="text-muted-foreground text-center max-w-sm mb-4">
+              Run a sync on your connection to see users here, or create a new one.
             </p>
+            <Button onClick={() => navigate(`/users/designer?connection_id=${selectedConnectionId}`)} variant="outline">
+              <Plus className="h-4 w-4 mr-2" />
+              Create User
+            </Button>
           </CardContent>
         </Card>
       ) : (
@@ -206,10 +218,10 @@ export default function UsersPage() {
           <CardContent>
             <div className="space-y-2">
               {users.map((user) => (
-                <Link
+                <div
                   key={user.id}
-                  to={`/users/${encodeURIComponent(user.name)}/access?connection_id=${selectedConnectionId}`}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer group"
+                  onClick={() => navigate(`/users/designer?connection_id=${selectedConnectionId}&edit_user=${encodeURIComponent(user.name)}`)}
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -237,9 +249,16 @@ export default function UsersPage() {
                     <span className="text-muted-foreground">
                       Created: {formatDate(user.created_on)}
                     </span>
+                    <Link
+                      to={`/users/${encodeURIComponent(user.name)}/access?connection_id=${selectedConnectionId}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-primary hover:underline"
+                    >
+                      View Access
+                    </Link>
                     <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-foreground" />
                   </div>
-                </Link>
+                </div>
               ))}
             </div>
           </CardContent>

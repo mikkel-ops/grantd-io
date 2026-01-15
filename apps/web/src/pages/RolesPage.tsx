@@ -10,6 +10,10 @@ interface Connection {
   id: string
   name: string
   platform: string
+  connection_config?: {
+    role?: string
+    username?: string
+  }
 }
 
 interface PlatformRole {
@@ -42,10 +46,19 @@ export default function RolesPage() {
   const [loading, setLoading] = useState(true)
   const [rolesLoading, setRolesLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [includeSystem, setIncludeSystem] = useState(true)
+  const [includeSystem, setIncludeSystem] = useState(false)
   const [expandedRole, setExpandedRole] = useState<string | null>(null)
   const [roleAssignments, setRoleAssignments] = useState<Record<string, RoleAssignment[]>>({})
   const [loadingAssignments, setLoadingAssignments] = useState<string | null>(null)
+
+  // Get the selected connection to access service role info
+  const selectedConnection = connections.find(c => c.id === selectedConnectionId)
+  const serviceRole = selectedConnection?.connection_config?.role || 'GRANTD_READONLY'
+
+  // Filter roles to exclude service role
+  const filteredRoles = roles.filter(role =>
+    role.name.toUpperCase() !== serviceRole.toUpperCase()
+  )
 
   // Load connections on mount
   useEffect(() => {
@@ -237,7 +250,7 @@ export default function RolesPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </CardContent>
         </Card>
-      ) : roles.length === 0 ? (
+      ) : filteredRoles.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <div className="rounded-full bg-muted p-3 mb-4">
@@ -258,13 +271,13 @@ export default function RolesPage() {
                 Platform Roles
               </span>
               <span className="text-sm font-normal text-muted-foreground">
-                {roles.length} role{roles.length !== 1 ? 's' : ''}
+                {filteredRoles.length} role{filteredRoles.length !== 1 ? 's' : ''}
               </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-2">
-              {roles.map((role) => (
+              {filteredRoles.map((role) => (
                 <div key={role.id}>
                   <div
                     className="flex items-center justify-between p-3 border rounded-lg hover:bg-muted/50 cursor-pointer"

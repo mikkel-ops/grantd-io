@@ -3,24 +3,24 @@ import { useAuth } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 import {
   LayoutDashboard,
-  Database,
   Users,
   Shield,
   FileText,
   Settings,
   LogOut,
   Menu,
-  Wand2,
+  Warehouse,
+  Building2,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Connections', href: '/connections', icon: Database },
+  { name: 'Accounts', href: '/connections', icon: Building2 },
   { name: 'Roles', href: '/roles', icon: Shield },
-  { name: 'Role Designer', href: '/roles/designer', icon: Wand2 },
   { name: 'Users', href: '/users', icon: Users },
+  { name: 'Warehouses', href: '/warehouses', icon: Warehouse },
   { name: 'Changesets', href: '/changesets', icon: FileText },
   { name: 'Settings', href: '/settings', icon: Settings },
 ]

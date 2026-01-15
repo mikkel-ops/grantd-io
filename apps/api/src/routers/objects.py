@@ -85,6 +85,16 @@ class UserAccessResponse(BaseModel):
     databases: list[DatabaseAccess]
     summary: AccessSummary
 
+
+class PlatformWarehouseResponse(BaseModel):
+    """Response for platform warehouse data."""
+    name: str
+    connection_id: str
+    grant_count: int
+    roles_with_access: list[str]
+    privileges: list[str]
+
+
 router = APIRouter(prefix="/objects")
 
 
@@ -265,6 +275,65 @@ async def list_grants(
     grants = db.execute(query.limit(limit).offset(offset)).scalars().all()
 
     return grants
+
+
+@router.get("/warehouses", response_model=list[PlatformWarehouseResponse])
+async def list_warehouses(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+    search: str = Query(None, description="Search by name"),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0),
+):
+    """List all warehouses for a connection with their grant information."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get all warehouse grants
+    query = select(PlatformGrant).where(
+        PlatformGrant.connection_id == connection_id,
+        PlatformGrant.object_type == "WAREHOUSE",
+    )
+
+    if search:
+        query = query.where(PlatformGrant.object_name.ilike(f"%{search}%"))
+
+    grants = db.execute(query).scalars().all()
+
+    # Group grants by warehouse name
+    warehouses_data: dict[str, dict] = {}
+    for grant in grants:
+        wh_name = grant.object_name
+        if not wh_name:
+            continue
+
+        if wh_name not in warehouses_data:
+            warehouses_data[wh_name] = {
+                "name": wh_name,
+                "connection_id": str(connection_id),
+                "roles_with_access": set(),
+                "privileges": set(),
+            }
+
+        warehouses_data[wh_name]["roles_with_access"].add(grant.grantee_name)
+        warehouses_data[wh_name]["privileges"].add(grant.privilege)
+
+    # Convert to response format
+    warehouses = []
+    for wh_name in sorted(warehouses_data.keys()):
+        data = warehouses_data[wh_name]
+        warehouses.append(PlatformWarehouseResponse(
+            name=data["name"],
+            connection_id=data["connection_id"],
+            grant_count=len(data["roles_with_access"]) * len(data["privileges"]),
+            roles_with_access=sorted(list(data["roles_with_access"])),
+            privileges=sorted(list(data["privileges"])),
+        ))
+
+    # Apply pagination
+    start = offset
+    end = offset + limit
+    return warehouses[start:end]
 
 
 @router.get("/users/{user_name}/access", response_model=UserAccessResponse)
@@ -489,11 +558,48 @@ class DatabaseInfo(BaseModel):
     is_imported: bool = False  # True for shared/imported databases
 
 
+class SchemaAccessDetail(BaseModel):
+    """Detailed access within a schema for access map visualization."""
+    name: str
+    table_count: int
+    view_count: int
+    privileges: list[str]  # e.g., ["SELECT", "USAGE"]
+
+
+class DatabaseAccessDetail(BaseModel):
+    """Detailed access within a database for access map visualization."""
+    name: str
+    privileges: list[str]  # Database-level privileges
+    schemas: list[SchemaAccessDetail]
+
+
+class RoleAccessSummary(BaseModel):
+    """Summary of what a role can access - for inheritance preview."""
+    role_name: str
+    description: str | None = None
+    is_system: bool = False  # True for system roles like ACCOUNTADMIN, SYSADMIN, etc.
+    database_count: int
+    schema_count: int
+    table_count: int
+    view_count: int
+    privilege_count: int
+    # Detailed breakdown for expanded view
+    databases: list[str]  # List of database names
+    sample_privileges: list[str]  # First few privileges as examples
+    # Detailed access map data
+    access_map: list[DatabaseAccessDetail] = []
+
+
 class RoleDesignerData(BaseModel):
     """Data for the role designer UI."""
     databases: list[DatabaseInfo]
+    warehouses: list[str] = []  # List of warehouse names
     roles: list[str]
     users: list[str]
+    role_summaries: dict[str, RoleAccessSummary] = {}  # role_name -> summary
+    # Service account info - these should be filtered out from role inheritance/assignment
+    service_user: str | None = None  # The Snowflake user Grantd connects as
+    service_role: str | None = None  # The role Grantd uses (default: GRANTD_READONLY)
 
 
 class PrivilegeSpec(BaseModel):
@@ -533,7 +639,13 @@ async def get_role_designer_data(
     db: DbSession,
 ):
     """Get data needed for the role designer (databases, schemas, existing roles, users)."""
-    verify_connection_access(db, connection_id, org_id)
+    connection = verify_connection_access(db, connection_id, org_id)
+
+    # Extract service account info from connection config
+    conn_config = connection.connection_config or {}
+    service_user = conn_config.get("username")
+    # Default role is GRANTD_READONLY if not specified
+    service_role = conn_config.get("role", "GRANTD_READONLY")
 
     # Get unique databases from grants
     db_query = db.execute(
@@ -594,10 +706,154 @@ async def get_role_designer_data(
         .order_by(PlatformUser.name)
     ).scalars().all()
 
+    # Get warehouses from grants (warehouses appear as grantable objects)
+    warehouse_names = db.execute(
+        select(PlatformGrant.object_name)
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_type == "WAREHOUSE",
+        )
+        .distinct()
+        .order_by(PlatformGrant.object_name)
+    ).scalars().all()
+    warehouses = sorted([w for w in warehouse_names if w])
+
+    # Build role summaries for inheritance preview
+    role_summaries: dict[str, RoleAccessSummary] = {}
+
+    # Get all roles with their metadata
+    all_roles = db.execute(
+        select(PlatformRole)
+        .where(PlatformRole.connection_id == connection_id)
+    ).scalars().all()
+    role_info = {r.name: r for r in all_roles}
+
+    # Get all grants grouped by role
+    all_grants = db.execute(
+        select(PlatformGrant)
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.grantee_type == "ROLE",
+        )
+    ).scalars().all()
+
+    # Group grants by grantee (role name)
+    grants_by_role: dict[str, list] = {}
+    for grant in all_grants:
+        if grant.grantee_name not in grants_by_role:
+            grants_by_role[grant.grantee_name] = []
+        grants_by_role[grant.grantee_name].append(grant)
+
+    # Build summary for each role
+    for role_name in roles:
+        role_grants = grants_by_role.get(role_name, [])
+
+        # Count unique databases, schemas, tables, views
+        unique_dbs = set()
+        unique_schemas = set()
+        table_count = 0
+        view_count = 0
+        sample_privs = []
+
+        # Build access map structure: {db_name: {privileges: set, schemas: {schema_name: {privileges: set, tables: int, views: int}}}}
+        access_data: dict[str, dict] = {}
+
+        for grant in role_grants:
+            db_name = grant.object_database
+            schema_name = grant.object_schema
+            obj_type = grant.object_type.upper() if grant.object_type else ""
+            privilege = grant.privilege
+
+            if db_name:
+                unique_dbs.add(db_name)
+
+                # Initialize db entry
+                if db_name not in access_data:
+                    access_data[db_name] = {"privileges": set(), "schemas": {}}
+
+                # Database-level privilege
+                if obj_type == "DATABASE":
+                    access_data[db_name]["privileges"].add(privilege)
+
+                # Schema-level access
+                if schema_name:
+                    unique_schemas.add(f"{db_name}.{schema_name}")
+
+                    # Initialize schema entry
+                    if schema_name not in access_data[db_name]["schemas"]:
+                        access_data[db_name]["schemas"][schema_name] = {
+                            "privileges": set(),
+                            "tables": 0,
+                            "views": 0,
+                        }
+
+                    if obj_type == "SCHEMA":
+                        access_data[db_name]["schemas"][schema_name]["privileges"].add(privilege)
+                    elif obj_type == "TABLE":
+                        access_data[db_name]["schemas"][schema_name]["tables"] += 1
+                        table_count += 1
+                    elif obj_type == "VIEW":
+                        access_data[db_name]["schemas"][schema_name]["views"] += 1
+                        view_count += 1
+
+            # Build sample privilege strings (first 5)
+            if len(sample_privs) < 5:
+                priv_str = privilege
+                if obj_type:
+                    obj_name = grant.object_name or schema_name or db_name or ""
+                    priv_str = f"{privilege} on {obj_type} {obj_name}"
+                sample_privs.append(priv_str)
+
+        # Convert access_data to access_map format
+        access_map = []
+        for db_name in sorted(access_data.keys()):
+            db_info = access_data[db_name]
+            schemas_list = []
+            for schema_name in sorted(db_info["schemas"].keys()):
+                schema_info = db_info["schemas"][schema_name]
+                schemas_list.append(SchemaAccessDetail(
+                    name=schema_name,
+                    table_count=schema_info["tables"],
+                    view_count=schema_info["views"],
+                    privileges=sorted(list(schema_info["privileges"])),
+                ))
+            access_map.append(DatabaseAccessDetail(
+                name=db_name,
+                privileges=sorted(list(db_info["privileges"])),
+                schemas=schemas_list,
+            ))
+
+        # Get role description and is_system flag
+        role_data = role_info.get(role_name)
+        description = None
+        is_system = False
+        if role_data:
+            is_system = role_data.is_system or False
+            if role_data.platform_data and isinstance(role_data.platform_data, dict):
+                description = role_data.platform_data.get("comment") or role_data.platform_data.get("description")
+
+        role_summaries[role_name] = RoleAccessSummary(
+            role_name=role_name,
+            description=description,
+            is_system=is_system,
+            database_count=len(unique_dbs),
+            schema_count=len(unique_schemas),
+            table_count=table_count,
+            view_count=view_count,
+            privilege_count=len(role_grants),
+            databases=sorted(list(unique_dbs)),
+            sample_privileges=sample_privs,
+            access_map=access_map,
+        )
+
     return RoleDesignerData(
         databases=databases,
+        warehouses=warehouses,
         roles=list(roles),
         users=list(users),
+        role_summaries=role_summaries,
+        service_user=service_user,
+        service_role=service_role,
     )
 
 
@@ -701,11 +957,9 @@ async def get_role_privileges(
             obj_name = grant.object_name or ""
 
         # Check if this is an imported database privilege
-        is_imported = (
-            obj_type == "DATABASE"
-            and grant.privilege == "IMPORTED PRIVILEGES"
-        ) or (
-            grant.object_database in imported_db_names
+        is_imported = bool(
+            (obj_type == "DATABASE" and grant.privilege == "IMPORTED PRIVILEGES")
+            or grant.object_database in imported_db_names
             or (grant.object_database and grant.object_database.upper() in ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE"))
         )
 
@@ -882,3 +1136,312 @@ async def preview_role_sql(
             summary += f", assigned to {len(design.assign_to_users)} user(s)"
 
     return SqlPreviewResponse(statements=statements, summary=summary)
+
+
+# ============================================================================
+# Warehouse Designer
+# ============================================================================
+
+class WarehouseDesignRequest(BaseModel):
+    """Request for warehouse design (create or alter)."""
+    warehouse_name: str
+    warehouse_size: str = "XSMALL"  # XSMALL, SMALL, MEDIUM, LARGE, etc.
+    auto_suspend: int = 300  # seconds
+    auto_resume: bool = True
+    initially_suspended: bool = True
+    comment: str = ""
+    # For edit mode
+    is_edit_mode: bool = False
+    original_size: str | None = None
+    original_auto_suspend: int | None = None
+    original_auto_resume: bool | None = None
+
+
+@router.post("/warehouse-designer/preview", response_model=SqlPreviewResponse)
+async def preview_warehouse_sql(
+    design: WarehouseDesignRequest,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Generate SQL preview for a warehouse design."""
+    verify_connection_access(db, connection_id, org_id)
+
+    statements = []
+
+    if design.is_edit_mode:
+        # ALTER WAREHOUSE mode
+        changes = []
+
+        if design.original_size and design.warehouse_size != design.original_size:
+            changes.append(f"WAREHOUSE_SIZE = {design.warehouse_size}")
+
+        if design.original_auto_suspend is not None and design.auto_suspend != design.original_auto_suspend:
+            changes.append(f"AUTO_SUSPEND = {design.auto_suspend}")
+
+        if design.original_auto_resume is not None and design.auto_resume != design.original_auto_resume:
+            changes.append(f"AUTO_RESUME = {str(design.auto_resume).upper()}")
+
+        if changes:
+            statements.append(
+                f"ALTER WAREHOUSE {design.warehouse_name} SET {', '.join(changes)};"
+            )
+            summary = f"Alters warehouse {design.warehouse_name} with {len(changes)} change(s)"
+        else:
+            statements.append(f"-- No changes to warehouse {design.warehouse_name}")
+            summary = f"No changes to warehouse {design.warehouse_name}"
+    else:
+        # CREATE WAREHOUSE mode
+        create_sql = f"""CREATE WAREHOUSE IF NOT EXISTS {design.warehouse_name}
+    WITH WAREHOUSE_SIZE = {design.warehouse_size}
+    AUTO_SUSPEND = {design.auto_suspend}
+    AUTO_RESUME = {str(design.auto_resume).upper()}
+    INITIALLY_SUSPENDED = {str(design.initially_suspended).upper()}"""
+
+        if design.comment:
+            create_sql += f"\n    COMMENT = '{design.comment}'"
+
+        create_sql += ";"
+        statements.append(create_sql)
+        summary = f"Creates warehouse {design.warehouse_name} (size: {design.warehouse_size})"
+
+    return SqlPreviewResponse(statements=statements, summary=summary)
+
+
+# ============================================================================
+# User Designer
+# ============================================================================
+
+class UserDesignRequest(BaseModel):
+    """Request for user design (create or alter)."""
+    user_name: str
+    login_name: str | None = None
+    display_name: str | None = None
+    email: str | None = None
+    default_role: str | None = None
+    default_warehouse: str | None = None
+    must_change_password: bool = True
+    disabled: bool = False
+    comment: str = ""
+    # Roles to assign to the user
+    roles: list[str] = []
+    # For edit mode
+    is_edit_mode: bool = False
+    original_display_name: str | None = None
+    original_email: str | None = None
+    original_default_role: str | None = None
+    original_default_warehouse: str | None = None
+    original_disabled: bool | None = None
+    original_roles: list[str] = []
+
+
+@router.post("/user-designer/preview", response_model=SqlPreviewResponse)
+async def preview_user_sql(
+    design: UserDesignRequest,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """Generate SQL preview for a user design."""
+    verify_connection_access(db, connection_id, org_id)
+
+    statements = []
+
+    if design.is_edit_mode:
+        # ALTER USER mode
+        changes = []
+
+        if design.original_display_name is not None and design.display_name != design.original_display_name:
+            if design.display_name:
+                changes.append(f"DISPLAY_NAME = '{design.display_name}'")
+
+        if design.original_email is not None and design.email != design.original_email:
+            if design.email:
+                changes.append(f"EMAIL = '{design.email}'")
+
+        if design.original_default_role is not None and design.default_role != design.original_default_role:
+            if design.default_role:
+                changes.append(f"DEFAULT_ROLE = {design.default_role}")
+
+        if design.original_default_warehouse is not None and design.default_warehouse != design.original_default_warehouse:
+            if design.default_warehouse:
+                changes.append(f"DEFAULT_WAREHOUSE = {design.default_warehouse}")
+
+        if design.original_disabled is not None and design.disabled != design.original_disabled:
+            changes.append(f"DISABLED = {str(design.disabled).upper()}")
+
+        if changes:
+            statements.append(
+                f"ALTER USER {design.user_name} SET {', '.join(changes)};"
+            )
+
+        # Handle role changes
+        original_role_set = set(design.original_roles)
+        new_role_set = set(design.roles)
+
+        grants_count = 0
+        revokes_count = 0
+
+        # Roles to grant
+        for role in design.roles:
+            if role not in original_role_set:
+                statements.append(f"GRANT ROLE {role} TO USER {design.user_name};")
+                grants_count += 1
+
+        # Roles to revoke
+        for role in design.original_roles:
+            if role not in new_role_set:
+                statements.append(f"REVOKE ROLE {role} FROM USER {design.user_name};")
+                revokes_count += 1
+
+        if not statements:
+            statements.append(f"-- No changes to user {design.user_name}")
+            summary = f"No changes to user {design.user_name}"
+        else:
+            summary = f"Modifies user {design.user_name}"
+            parts = []
+            if changes:
+                parts.append(f"{len(changes)} property change(s)")
+            if grants_count > 0:
+                parts.append(f"{grants_count} role grant(s)")
+            if revokes_count > 0:
+                parts.append(f"{revokes_count} role revoke(s)")
+            if parts:
+                summary += f" with {', '.join(parts)}"
+
+    else:
+        # CREATE USER mode
+        create_parts = [f"CREATE USER IF NOT EXISTS {design.user_name}"]
+
+        if design.login_name:
+            create_parts.append(f"LOGIN_NAME = '{design.login_name}'")
+        if design.display_name:
+            create_parts.append(f"DISPLAY_NAME = '{design.display_name}'")
+        if design.email:
+            create_parts.append(f"EMAIL = '{design.email}'")
+        if design.default_role:
+            create_parts.append(f"DEFAULT_ROLE = {design.default_role}")
+        if design.default_warehouse:
+            create_parts.append(f"DEFAULT_WAREHOUSE = {design.default_warehouse}")
+
+        create_parts.append(f"MUST_CHANGE_PASSWORD = {str(design.must_change_password).upper()}")
+        create_parts.append(f"DISABLED = {str(design.disabled).upper()}")
+
+        if design.comment:
+            create_parts.append(f"COMMENT = '{design.comment}'")
+
+        statements.append("\n    ".join(create_parts) + ";")
+
+        # Grant roles to the new user
+        for role in design.roles:
+            statements.append(f"GRANT ROLE {role} TO USER {design.user_name};")
+
+        summary = f"Creates user {design.user_name}"
+        if design.roles:
+            summary += f" with {len(design.roles)} role(s)"
+
+    return SqlPreviewResponse(statements=statements, summary=summary)
+
+
+@router.get("/user-designer/data")
+async def get_user_designer_data(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+    user_name: str | None = Query(None, description="User name to edit"),
+):
+    """Get data needed for the user designer (roles, warehouses, and optionally user details)."""
+    connection = verify_connection_access(db, connection_id, org_id)
+
+    # Get available roles
+    roles_query = db.execute(
+        select(PlatformRole.name).where(
+            PlatformRole.connection_id == connection_id,
+        )
+    ).scalars().all()
+    roles = sorted(set(roles_query))
+
+    # Get warehouses
+    wh_query = db.execute(
+        select(distinct(PlatformGrant.object_name)).where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_type == "WAREHOUSE",
+        )
+    ).scalars().all()
+    warehouses = sorted([w for w in wh_query if w])
+
+    # Get service account info
+    conn_config = connection.connection_config or {}
+    service_user = conn_config.get("username")
+    service_role = conn_config.get("role", "GRANTD_READONLY")
+
+    result = {
+        "roles": roles,
+        "warehouses": warehouses,
+        "service_user": service_user,
+        "service_role": service_role,
+    }
+
+    # If editing a user, get their current data
+    if user_name:
+        user = db.execute(
+            select(PlatformUser).where(
+                PlatformUser.connection_id == connection_id,
+                PlatformUser.name == user_name,
+            )
+        ).scalar_one_or_none()
+
+        if user:
+            # Get user's current roles
+            user_roles = db.execute(
+                select(RoleAssignment.role_name).where(
+                    RoleAssignment.connection_id == connection_id,
+                    RoleAssignment.assignee_name == user_name,
+                    RoleAssignment.assignee_type == "USER",
+                )
+            ).scalars().all()
+
+            platform_data = user.platform_data or {}
+            result["user"] = {
+                "name": user.name,
+                "email": user.email,
+                "display_name": user.display_name,
+                "disabled": user.disabled,
+                "default_role": platform_data.get("default_role"),
+                "default_warehouse": platform_data.get("default_warehouse"),
+                "roles": list(user_roles),
+            }
+
+    return result
+
+
+@router.get("/warehouse-designer/data")
+async def get_warehouse_designer_data(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+    warehouse_name: str | None = Query(None, description="Warehouse name to edit"),
+):
+    """Get data needed for the warehouse designer."""
+    verify_connection_access(db, connection_id, org_id)
+
+    result: dict = {}
+
+    # If editing a warehouse, get its current data from grants
+    if warehouse_name:
+        grants = db.execute(
+            select(PlatformGrant).where(
+                PlatformGrant.connection_id == connection_id,
+                PlatformGrant.object_type == "WAREHOUSE",
+                PlatformGrant.object_name == warehouse_name,
+            )
+        ).scalars().all()
+
+        if grants:
+            result["warehouse"] = {
+                "name": warehouse_name,
+                "roles_with_access": list(set(g.grantee_name for g in grants)),
+                "privileges": list(set(g.privilege for g in grants)),
+            }
+
+    return result

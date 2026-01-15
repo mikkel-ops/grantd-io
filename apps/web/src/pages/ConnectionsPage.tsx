@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Database, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info, RefreshCw, Settings, Clock } from 'lucide-react'
+import { Building2, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info, RefreshCw, Settings, Clock, ShieldCheck, ShieldX } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 
@@ -43,10 +43,44 @@ const platforms: { id: Platform; name: string; available: boolean }[] = [
   { id: 'redshift', name: 'Redshift', available: false },
 ]
 
-const SNOWFLAKE_SETUP_SQL = `-- ============================================
+// Generate dynamic SQL based on warehouse and database names
+const generateSnowflakeSetupSQL = (warehouse: string, databases: string[]) => {
+  const warehouseName = warehouse.trim() || '<YOUR_WAREHOUSE>'
+
+  let databaseGrants = ''
+  if (databases.length > 0 && databases.some(db => db.trim())) {
+    databaseGrants = databases
+      .filter(db => db.trim())
+      .map(db => {
+        const dbName = db.trim().toUpperCase()
+        return `
+-- Database: ${dbName}
+GRANT USAGE ON DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT USAGE ON ALL SCHEMAS IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT USAGE ON FUTURE SCHEMAS IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT REFERENCES ON ALL TABLES IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT REFERENCES ON ALL VIEWS IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT REFERENCES ON FUTURE TABLES IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;
+GRANT REFERENCES ON FUTURE VIEWS IN DATABASE ${dbName} TO ROLE GRANTD_READONLY;`
+      }).join('\n')
+  } else {
+    databaseGrants = `
+-- Add your database names above to generate grants automatically
+-- Example grants for a database called ANALYTICS:
+-- GRANT USAGE ON DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT USAGE ON ALL SCHEMAS IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT USAGE ON FUTURE SCHEMAS IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT REFERENCES ON ALL TABLES IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT REFERENCES ON ALL VIEWS IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT REFERENCES ON FUTURE TABLES IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;
+-- GRANT REFERENCES ON FUTURE VIEWS IN DATABASE ANALYTICS TO ROLE GRANTD_READONLY;`
+  }
+
+  return `-- ============================================
 -- Grantd Service User Setup for Snowflake
 -- ============================================
 -- Run this script as ACCOUNTADMIN or SECURITYADMIN
+-- This creates a METADATA-ONLY role that can see structure but CANNOT query data
 
 -- 1. Create a dedicated role for Grantd
 USE ROLE SECURITYADMIN;
@@ -56,27 +90,30 @@ CREATE ROLE IF NOT EXISTS GRANTD_READONLY;
 CREATE USER IF NOT EXISTS GRANTD_SERVICE
   TYPE = SERVICE
   DEFAULT_ROLE = GRANTD_READONLY
-  COMMENT = 'Service user for Grantd RBAC management';
+  COMMENT = 'Service user for Grantd RBAC management - metadata only, no data access';
 
 -- 3. Assign the role to the user
 GRANT ROLE GRANTD_READONLY TO USER GRANTD_SERVICE;
 
--- 4. Grant read-only permissions for RBAC visibility
+-- 4. Grant RBAC visibility (via SNOWFLAKE database)
 USE ROLE ACCOUNTADMIN;
-
--- View users, roles, and grants (via SNOWFLAKE database)
 GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO ROLE GRANTD_READONLY;
 
--- Grant warehouse access for metadata queries
-GRANT USAGE ON WAREHOUSE <YOUR_WAREHOUSE> TO ROLE GRANTD_READONLY;
+-- 5. Grant warehouse access for metadata queries
+GRANT USAGE ON WAREHOUSE ${warehouseName} TO ROLE GRANTD_READONLY;
 
--- Optional: Grant access to specific databases for metadata visibility
--- GRANT USAGE ON DATABASE <DB_NAME> TO ROLE GRANTD_READONLY;
--- GRANT USAGE ON ALL SCHEMAS IN DATABASE <DB_NAME> TO ROLE GRANTD_READONLY;
+-- ============================================
+-- 6. Grant metadata visibility to your databases
+-- ============================================
+-- These grants allow Grantd to see database structure WITHOUT data access
+${databaseGrants}
 
--- 5. Verify setup
+-- ============================================
+-- 7. Verify setup
+-- ============================================
 SHOW GRANTS TO USER GRANTD_SERVICE;
 SHOW GRANTS TO ROLE GRANTD_READONLY;`
+}
 
 export default function ConnectionsPage() {
   const { getToken } = useAuth()
@@ -97,6 +134,7 @@ export default function ConnectionsPage() {
     warehouse: '',
     privateKey: '',
   })
+  const [databaseNames, setDatabaseNames] = useState('')  // Comma-separated database names for SQL generation
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [syncingConnectionId, setSyncingConnectionId] = useState<string | null>(null)
@@ -120,15 +158,21 @@ export default function ConnectionsPage() {
     loadConnections()
   }, [getToken])
 
+  // Parse database names from comma-separated string
+  const parsedDatabases = databaseNames.split(',').map(db => db.trim()).filter(db => db)
+
+  // Generate the SQL with current warehouse and database values
+  const generatedSQL = generateSnowflakeSetupSQL(formData.warehouse, parsedDatabases)
+
   const handleCopySQL = async () => {
-    await navigator.clipboard.writeText(SNOWFLAKE_SETUP_SQL)
+    await navigator.clipboard.writeText(generatedSQL)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
   const validateForm = () => {
     const errors: Record<string, string> = {}
-    if (!formData.name.trim()) errors.name = 'Connection name is required'
+    if (!formData.name.trim()) errors.name = 'Account name is required'
     if (!formData.account.trim()) errors.account = 'Account identifier is required'
     if (!formData.username.trim()) errors.username = 'Username is required'
     if (!formData.privateKey.trim()) errors.privateKey = 'Private key is required'
@@ -210,6 +254,7 @@ export default function ConnectionsPage() {
     setSelectedPlatform(null)
     setShowForm(false)
     setFormData({ name: '', account: '', username: 'GRANTD_SERVICE', warehouse: '', privateKey: '' })
+    setDatabaseNames('')
     setFormErrors({})
     setTestResult(null)
   }
@@ -230,7 +275,7 @@ export default function ConnectionsPage() {
   }
 
   const handleDeleteConnection = async (connectionId: string) => {
-    if (!confirm('Are you sure you want to delete this connection? This will remove all synced data.')) {
+    if (!confirm('Are you sure you want to delete this account? This will remove all synced data.')) {
       return
     }
     try {
@@ -262,21 +307,21 @@ export default function ConnectionsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-bold">Connections</h1>
+          <h1 className="text-3xl font-bold">Accounts</h1>
           <p className="text-muted-foreground">
-            Manage your data platform connections
+            Connect your data platform accounts for RBAC visibility
           </p>
         </div>
         <Button onClick={() => setShowForm(true)}>
           <Plus className="h-4 w-4 mr-2" />
-          Add Connection
+          Add Account
         </Button>
       </div>
 
       {showForm ? (
         <Card>
           <CardHeader>
-            <CardTitle>New Connection</CardTitle>
+            <CardTitle>Connect Account</CardTitle>
           </CardHeader>
           <CardContent>
             {!selectedPlatform ? (
@@ -312,6 +357,129 @@ export default function ConnectionsPage() {
               </div>
             ) : selectedPlatform === 'snowflake' ? (
               <div className="space-y-6">
+                {/* Account Details - at the top */}
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Account Details</h3>
+                    <button
+                      onClick={() => setSelectedPlatform(null)}
+                      className="text-xs text-muted-foreground hover:text-foreground underline"
+                    >
+                      ← Change platform
+                    </button>
+                  </div>
+
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="name">Account Name *</Label>
+                      <Input
+                        id="name"
+                        placeholder="e.g., Production Snowflake"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                        className={formErrors.name ? 'border-red-500' : ''}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        A friendly name to identify this account
+                      </p>
+                      {formErrors.name && (
+                        <p className="text-xs text-red-500">{formErrors.name}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="account">Account Identifier *</Label>
+                      <Input
+                        id="account"
+                        placeholder="e.g., DDZTQOP-OY28586"
+                        value={formData.account}
+                        onChange={(e) => setFormData({ ...formData, account: e.target.value })}
+                        className={formErrors.account ? 'border-red-500' : ''}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Format: <code>ORGNAME-ACCOUNTNAME</code> (without .snowflakecomputing.com)
+                      </p>
+                      {formErrors.account && (
+                        <p className="text-xs text-red-500">{formErrors.account}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="username">Service Username *</Label>
+                      <Input
+                        id="username"
+                        placeholder="e.g., GRANTD_SERVICE"
+                        value={formData.username}
+                        onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                        className={formErrors.username ? 'border-red-500' : ''}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        The service user created in Snowflake
+                      </p>
+                      {formErrors.username && (
+                        <p className="text-xs text-red-500">{formErrors.username}</p>
+                      )}
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="warehouseTop">Warehouse *</Label>
+                      <Input
+                        id="warehouseTop"
+                        placeholder="e.g., COMPUTE_WH"
+                        value={formData.warehouse}
+                        onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Warehouse for metadata queries (minimal credits)
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Security Overview */}
+                <Card className="border-green-200 bg-green-50/50 dark:border-green-900 dark:bg-green-950/20">
+                  <CardContent className="pt-6">
+                    <div className="flex gap-4">
+                      <div className="flex-shrink-0">
+                        <div className="rounded-full bg-green-100 p-2">
+                          <ShieldCheck className="h-5 w-5 text-green-600" />
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <div>
+                          <h4 className="font-semibold text-green-900 dark:text-green-100">Metadata-only access</h4>
+                          <p className="text-sm text-green-800 dark:text-green-200">
+                            Grantd uses a role with <strong>USAGE</strong> and <strong>REFERENCES</strong> privileges only.
+                            This allows visibility into database structure without any ability to query data.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div>
+                            <p className="font-medium text-green-900 dark:text-green-100 flex items-center gap-1">
+                              <ShieldCheck className="h-4 w-4" /> Can see:
+                            </p>
+                            <ul className="text-green-800 dark:text-green-200 space-y-0.5 mt-1">
+                              <li>• Users, roles, and grants</li>
+                              <li>• Database & schema structure</li>
+                              <li>• Table/view names & columns</li>
+                            </ul>
+                          </div>
+                          <div>
+                            <p className="font-medium text-red-700 dark:text-red-400 flex items-center gap-1">
+                              <ShieldX className="h-4 w-4" /> Cannot:
+                            </p>
+                            <ul className="text-red-700 dark:text-red-400 space-y-0.5 mt-1">
+                              <li>• SELECT from tables</li>
+                              <li>• Query any data</li>
+                              <li>• Modify anything</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Setup Guide */}
                 <Card className="border-blue-200 bg-blue-50/50 dark:border-blue-900 dark:bg-blue-950/20">
                   <CardHeader className="pb-3">
@@ -330,30 +498,49 @@ export default function ConnectionsPage() {
                       )}
                     </button>
                     <CardDescription>
-                      Grantd requires a read-only service user with key-pair authentication
+                      Create a metadata-only service user with key-pair authentication
                     </CardDescription>
                   </CardHeader>
                   {showGuide && (
                     <CardContent className="space-y-4">
                       <div className="space-y-3">
-                        <h4 className="font-semibold">What permissions does Grantd need?</h4>
-                        <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
-                          <li>View users, roles, and role assignments</li>
-                          <li>View grants and permissions</li>
-                          <li>View database and schema metadata</li>
-                          <li><span className="text-red-600 font-medium">No data access</span> - Grantd cannot query your tables</li>
-                          <li><span className="text-red-600 font-medium">No write access</span> - Changes are applied via CLI with your credentials</li>
-                        </ul>
-                      </div>
-
-                      <div className="space-y-3">
-                        <h4 className="font-semibold">Step 1: Run the setup script in Snowflake</h4>
+                        <h4 className="font-semibold">Step 1: Configure and run the setup script</h4>
                         <p className="text-sm text-muted-foreground">
-                          Copy and run this SQL in your Snowflake worksheet as ACCOUNTADMIN:
+                          Enter your database names below. The SQL script will update automatically with your warehouse and databases.
+                          Then copy and run it in your Snowflake worksheet as ACCOUNTADMIN.
                         </p>
+
+                        {/* Dynamic SQL inputs */}
+                        <div className="grid gap-3 p-3 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                          <div className="space-y-1">
+                            <Label htmlFor="sqlDatabases" className="text-xs font-medium">
+                              Databases to grant visibility (comma-separated)
+                            </Label>
+                            <Input
+                              id="sqlDatabases"
+                              placeholder="e.g., ANALYTICS, RAW_DATA, PROD_DWH"
+                              value={databaseNames}
+                              onChange={(e) => setDatabaseNames(e.target.value)}
+                              className="h-8 text-sm bg-white dark:bg-slate-900"
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Enter the databases you want Grantd to see. Without database access, Grantd can only show RBAC metadata.
+                            </p>
+                          </div>
+                          {parsedDatabases.length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                              {parsedDatabases.map((db, i) => (
+                                <span key={i} className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                                  {db.toUpperCase()}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
                         <div className="relative">
-                          <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg text-xs overflow-x-auto max-h-64 overflow-y-auto">
-                            {SNOWFLAKE_SETUP_SQL}
+                          <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg text-xs overflow-x-auto max-h-80 overflow-y-auto">
+                            {generatedSQL}
                           </pre>
                           <Button
                             size="sm"
@@ -376,8 +563,19 @@ export default function ConnectionsPage() {
                         </div>
                       </div>
 
+                      {!parsedDatabases.length && (
+                        <Alert className="border-amber-200 bg-amber-50/50">
+                          <Info className="h-4 w-4 text-amber-600" />
+                          <AlertTitle className="text-amber-900">Add your databases</AlertTitle>
+                          <AlertDescription className="text-amber-800">
+                            Enter your database names above to generate the complete setup script.
+                            Without database access, Grantd can only show role and user information but not database structure.
+                          </AlertDescription>
+                        </Alert>
+                      )}
+
                       <div className="space-y-3">
-                        <h4 className="font-semibold">Step 2: Generate a key pair and assign to user</h4>
+                        <h4 className="font-semibold">Step 2: Generate a key pair</h4>
                         <p className="text-sm text-muted-foreground">
                           Run these commands on your local machine to generate keys:
                         </p>
@@ -391,100 +589,32 @@ openssl rsa -in grantd_rsa_key.p8 -pubout -out grantd_rsa_key.pub
 # View the public key to copy it
 cat grantd_rsa_key.pub`}
                         </pre>
+                      </div>
+
+                      <div className="space-y-3">
+                        <h4 className="font-semibold">Step 3: Assign the public key to your service user</h4>
                         <p className="text-sm text-muted-foreground">
-                          Then assign the public key to your service user in Snowflake:
+                          Run this in Snowflake (paste your public key without the BEGIN/END headers):
                         </p>
                         <pre className="bg-slate-900 text-slate-100 p-4 rounded-lg text-xs overflow-x-auto">
-{`ALTER USER GRANTD_SERVICE SET RSA_PUBLIC_KEY='<paste-your-public-key-here>';`}
+{`ALTER USER GRANTD_SERVICE SET RSA_PUBLIC_KEY='MIIBIjANBgkqh...your-key-here...';`}
                         </pre>
                       </div>
 
                       <Alert>
-                        <Info className="h-4 w-4" />
-                        <AlertTitle>Security Note</AlertTitle>
+                        <ShieldCheck className="h-4 w-4" />
+                        <AlertTitle>Zero data access by design</AlertTitle>
                         <AlertDescription>
-                          Your private key is encrypted and stored securely in AWS Parameter Store.
-                          Grantd never has access to your data - only role and permission metadata.
+                          Grantd separates <strong>object visibility</strong> (USAGE/REFERENCES) from <strong>data access</strong> (SELECT).
+                          Your private key is encrypted in AWS Parameter Store. Changes are applied via CLI with your own credentials.
                         </AlertDescription>
                       </Alert>
                     </CardContent>
                   )}
                 </Card>
 
-                {/* Connection Form */}
+                {/* Private Key and Actions */}
                 <form onSubmit={handleCreateConnection} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="name">Connection Name *</Label>
-                    <Input
-                      id="name"
-                      placeholder="e.g., Production Snowflake"
-                      value={formData.name}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className={formErrors.name ? 'border-red-500' : ''}
-                    />
-                    {formErrors.name && (
-                      <p className="text-xs text-red-500">{formErrors.name}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="account">Account Identifier *</Label>
-                    <Input
-                      id="account"
-                      placeholder="e.g., DDZTQOP-OY28586"
-                      value={formData.account}
-                      onChange={(e) => setFormData({ ...formData, account: e.target.value })}
-                      className={formErrors.account ? 'border-red-500' : ''}
-                    />
-                    <div className="text-xs text-muted-foreground space-y-2">
-                      <p>
-                        <strong>Format:</strong> <code>ORGNAME-ACCOUNTNAME</code>
-                      </p>
-                      <p className="text-muted-foreground">
-                        Find this in Snowflake: <strong>Admin → Accounts</strong> → hover over your account → copy the Account identifier.
-                      </p>
-                      <p className="text-muted-foreground">
-                        Or run this SQL: <code>SELECT CURRENT_ORGANIZATION_NAME() || '-' || CURRENT_ACCOUNT_NAME();</code>
-                      </p>
-                      <p className="text-amber-600">
-                        Do NOT include ".snowflakecomputing.com"
-                      </p>
-                    </div>
-                    {formErrors.account && (
-                      <p className="text-xs text-red-500">{formErrors.account}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="username">Service Username *</Label>
-                    <Input
-                      id="username"
-                      placeholder="e.g., GRANTD_SERVICE"
-                      value={formData.username}
-                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                      className={formErrors.username ? 'border-red-500' : ''}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      The username of the service user you created (default: GRANTD_SERVICE)
-                    </p>
-                    {formErrors.username && (
-                      <p className="text-xs text-red-500">{formErrors.username}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="warehouse">Warehouse (optional)</Label>
-                    <Input
-                      id="warehouse"
-                      placeholder="e.g., COMPUTE_WH"
-                      value={formData.warehouse}
-                      onChange={(e) => setFormData({ ...formData, warehouse: e.target.value })}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      A warehouse for running metadata queries (uses minimal credits)
-                    </p>
-                  </div>
-
                   <div className="space-y-2">
                     <Label htmlFor="privateKey">Private Key *</Label>
                     <Textarea
@@ -548,10 +678,10 @@ MIIEvgIBADANBgkqhkiG9w...
                       {loading ? (
                         <>
                           <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                          Creating...
+                          Connecting...
                         </>
                       ) : (
-                        'Create Connection'
+                        'Connect Account'
                       )}
                     </Button>
                     <Button
@@ -649,8 +779,8 @@ MIIEvgIBADANBgkqhkiG9w...
             <Card className="mt-4">
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <div>
-                  <CardTitle className="text-lg">Configure: {selectedConnection.name}</CardTitle>
-                  <CardDescription>Connection details and settings</CardDescription>
+                  <CardTitle className="text-lg">{selectedConnection.name}</CardTitle>
+                  <CardDescription>Account details and sync settings</CardDescription>
                 </div>
                 <Button
                   variant="ghost"
@@ -742,7 +872,7 @@ MIIEvgIBADANBgkqhkiG9w...
                     className="text-red-600 hover:text-red-700"
                     onClick={() => handleDeleteConnection(selectedConnection.id)}
                   >
-                    Delete Connection
+                    Delete Account
                   </Button>
                 </div>
               </CardContent>
@@ -753,11 +883,11 @@ MIIEvgIBADANBgkqhkiG9w...
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-12">
             <div className="rounded-full bg-muted p-3 mb-4">
-              <Database className="h-6 w-6 text-muted-foreground" />
+              <Building2 className="h-6 w-6 text-muted-foreground" />
             </div>
-            <h3 className="text-lg font-semibold mb-2">No connections yet</h3>
+            <h3 className="text-lg font-semibold mb-2">No accounts connected</h3>
             <p className="text-muted-foreground text-center max-w-sm">
-              Add your first platform connection to start syncing roles and
+              Connect your first Snowflake account to start syncing roles and
               permissions.
             </p>
           </CardContent>
