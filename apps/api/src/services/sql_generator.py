@@ -45,6 +45,18 @@ def _generate_snowflake_sql(
             grantee_type = details.get("grantee_type", "USER").upper()
             return f"REVOKE ROLE {object_name} FROM {grantee_type} {grantee};"
 
+        case "grant" if object_type == "role_assignment":
+            # Canvas-style role assignment: grant role to user
+            user_name = details.get("user_name")
+            role_name = details.get("role_name")
+            return f"GRANT ROLE {role_name} TO USER {user_name};"
+
+        case "revoke" if object_type == "role_assignment":
+            # Canvas-style role revocation: revoke role from user
+            user_name = details.get("user_name")
+            role_name = details.get("role_name")
+            return f"REVOKE ROLE {role_name} FROM USER {user_name};"
+
         case "grant_privilege":
             privilege = details.get("privilege")
             on_type = details.get("on_type")
