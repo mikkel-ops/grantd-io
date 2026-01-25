@@ -21,19 +21,23 @@ import { User, Shield, Database, Loader2, Plus, Minus, Trash2, FileText, ArrowRi
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNavigate } from 'react-router-dom'
+import { AddUserModal, AddRoleModal, UserDetails } from '@/components/canvas'
 
 // Pending change type
 interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role'
-  userName: string
-  roleName: string
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role'
+  userName?: string
+  roleName?: string
+  userDetails?: UserDetails
 }
 
 // Custom node for Users
-function UserNode({ data }: { data: { label: string; email?: string } }) {
+function UserNode({ data }: { data: { label: string; email?: string; isNew?: boolean } }) {
   return (
-    <div className="px-4 py-3 shadow-md rounded-lg bg-white border-2 border-blue-400 min-w-[150px]">
+    <div className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 border-blue-400 min-w-[150px] ${
+      data.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4 animate-pulse' : ''
+    }`}>
       <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-blue-500" />
       <div className="flex items-center gap-2">
         <div className="rounded-full bg-blue-100 p-1.5">
@@ -51,7 +55,7 @@ function UserNode({ data }: { data: { label: string; email?: string } }) {
 }
 
 // Custom node for Roles
-function RoleNode({ data }: { data: { label: string; type?: string; isSystem?: boolean } }) {
+function RoleNode({ data }: { data: { label: string; type?: string; isSystem?: boolean; isNew?: boolean } }) {
   const getBorderColor = () => {
     if (data.type === 'functional') return 'border-purple-400'
     if (data.type === 'business') return 'border-green-400'
@@ -74,7 +78,9 @@ function RoleNode({ data }: { data: { label: string; type?: string; isSystem?: b
   }
 
   return (
-    <div className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 ${getBorderColor()} min-w-[150px]`}>
+    <div className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 ${getBorderColor()} min-w-[150px] ${
+      data.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4 animate-pulse' : ''
+    }`}>
       <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-gray-500" />
       <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-gray-500" />
       <div className="flex items-center gap-2">
@@ -109,10 +115,33 @@ function DatabaseNode({ data }: { data: { label: string } }) {
   )
 }
 
+// Custom node for Add buttons
+function AddButtonNode({ data }: { data: { label: string; type: 'user' | 'role'; onClick: () => void } }) {
+  const isUser = data.type === 'user'
+  return (
+    <button
+      onClick={data.onClick}
+      className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 border-dashed min-w-[150px] cursor-pointer transition-all hover:shadow-lg ${
+        isUser ? 'border-blue-300 hover:border-blue-400' : 'border-green-300 hover:border-green-400'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <div className={`rounded-full p-1.5 ${isUser ? 'bg-blue-50' : 'bg-green-50'}`}>
+          <Plus className={`h-4 w-4 ${isUser ? 'text-blue-400' : 'text-green-400'}`} />
+        </div>
+        <div className={`text-sm font-medium ${isUser ? 'text-blue-500' : 'text-green-500'}`}>
+          {data.label}
+        </div>
+      </div>
+    </button>
+  )
+}
+
 const nodeTypes: NodeTypes = {
   user: UserNode,
   role: RoleNode,
   database: DatabaseNode,
+  addButton: AddButtonNode,
 }
 
 interface ApiConnection {
@@ -149,6 +178,10 @@ export default function CanvasPage() {
   const [connectionId, setConnectionId] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
+  // Modal state
+  const [showAddUserModal, setShowAddUserModal] = useState(false)
+  const [showAddRoleModal, setShowAddRoleModal] = useState(false)
+
   // Load data and create nodes/edges
   useEffect(() => {
     const loadData = async () => {
@@ -162,13 +195,13 @@ export default function CanvasPage() {
 
         // First get the connections to find the connection_id
         const connections = await api.get<ApiConnection[]>('/connections', token)
-        if (connections.length === 0) {
+        if (!connections || connections.length === 0) {
           console.log('No connections found')
           setLoading(false)
           return
         }
 
-        const connId = connections[0].id
+        const connId = connections[0]!.id
         setConnectionId(connId)
 
         // Load users, roles, and assignments in parallel
@@ -244,7 +277,26 @@ export default function CanvasPage() {
             return sourceExists && targetExists
           })
 
-        setNodes([...userNodes, ...allRoleNodes])
+        // Add button nodes (positioned below last user and last business role)
+        const addUserNode: Node = {
+          id: 'add-user-button',
+          type: 'addButton',
+          position: { x: 50, y: 50 + users.length * 80 },
+          data: { label: 'Add User', type: 'user', onClick: () => {} }, // onClick set later via nodeTypes
+          selectable: false,
+          draggable: false,
+        }
+
+        const addRoleNode: Node = {
+          id: 'add-role-button',
+          type: 'addButton',
+          position: { x: 350, y: 50 + businessRoles.length * 80 },
+          data: { label: 'Add Business Role', type: 'role', onClick: () => {} },
+          selectable: false,
+          draggable: false,
+        }
+
+        setNodes([...userNodes, ...allRoleNodes, addUserNode, addRoleNode])
         setEdges([...assignmentEdges, ...roleToRoleEdges])
       } catch (error) {
         console.error('Failed to load canvas data:', error)
@@ -291,18 +343,17 @@ export default function CanvasPage() {
     [setEdges]
   )
 
-  const removePendingChange = useCallback((changeId: string, changeType: 'grant_role' | 'revoke_role') => {
+  const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges((prev) => prev.filter((c) => c.id !== changeId))
 
     if (changeType === 'grant_role') {
       // Remove the pending grant edge
       setEdges((eds) => eds.filter((e) => !e.id.includes(changeId)))
-    } else {
+    } else if (changeType === 'revoke_role') {
       // Restore the original edge style for revoke cancellation
       setEdges((eds) => eds.map((e) => {
         if (e.id === `revoke-${changeId}`) {
           // Find the original edge and restore it
-          const [userName, roleName] = changeId.split('-')
           return {
             ...e,
             id: `edge-restored-${changeId}`,
@@ -312,11 +363,50 @@ export default function CanvasPage() {
         }
         return e
       }))
+    } else if (changeType === 'create_user') {
+      // Remove the new user node
+      setNodes((nds) => {
+        const filtered = nds.filter(n => n.id !== `user-${changeId}`)
+        // Reposition add button
+        const userCount = filtered.filter(n => n.type === 'user').length
+        return filtered.map(n => {
+          if (n.id === 'add-user-button') {
+            return { ...n, position: { x: 50, y: 50 + userCount * 80 } }
+          }
+          return n
+        })
+      })
+      // Remove any edges connected to this user
+      setEdges((eds) => eds.filter((e) => e.source !== `user-${changeId}`))
+    } else if (changeType === 'create_role') {
+      // Remove the new role node
+      setNodes((nds) => {
+        const filtered = nds.filter(n => n.id !== `role-${changeId}`)
+        // Reposition add button
+        const businessRoleCount = filtered.filter(n => n.type === 'role' && n.position.x === 350).length
+        return filtered.map(n => {
+          if (n.id === 'add-role-button') {
+            return { ...n, position: { x: 350, y: 50 + businessRoleCount * 80 } }
+          }
+          return n
+        })
+      })
+      // Remove any edges connected to this role
+      setEdges((eds) => eds.filter((e) => e.target !== `role-${changeId}` && e.source !== `role-${changeId}`))
     }
-  }, [setEdges])
+  }, [setEdges, setNodes])
+
+  // Handle clicking on nodes (for add buttons)
+  const onNodeClick = useCallback((_event: React.MouseEvent, node: Node) => {
+    if (node.id === 'add-user-button') {
+      setShowAddUserModal(true)
+    } else if (node.id === 'add-role-button') {
+      setShowAddRoleModal(true)
+    }
+  }, [])
 
   // Handle clicking on existing edges to mark/unmark them for revocation
-  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+  const onEdgeClick = useCallback((_event: React.MouseEvent, edge: Edge) => {
     // Don't handle pending grant edges or role-to-role edges
     if (edge.id.startsWith('pending-') || edge.id.startsWith('role-edge-')) {
       return
@@ -386,6 +476,110 @@ export default function CanvasPage() {
     ])
   }, [setEdges, pendingChanges])
 
+  // Handle user created from modal
+  const handleUserCreated = useCallback((details: UserDetails) => {
+    const userCount = nodes.filter(n => n.type === 'user').length
+    const newUserNode: Node = {
+      id: `user-${details.userName}`,
+      type: 'user',
+      position: { x: 50, y: 50 + userCount * 80 },
+      data: { label: details.userName, email: details.email, isNew: true },
+    }
+
+    // Update add-user-button position
+    setNodes((nds) => {
+      const filtered = nds.filter(n => n.id !== 'add-user-button')
+      return [
+        ...filtered,
+        newUserNode,
+        {
+          id: 'add-user-button',
+          type: 'addButton',
+          position: { x: 50, y: 50 + (userCount + 1) * 80 },
+          data: { label: 'Add User', type: 'user', onClick: () => {} },
+          selectable: false,
+          draggable: false,
+        },
+      ]
+    })
+
+    // Add pending change for creating the user
+    setPendingChanges((prev) => [
+      ...prev,
+      {
+        id: details.userName,
+        type: 'create_user',
+        userName: details.userName,
+        userDetails: details,
+      },
+    ])
+
+    setShowAddUserModal(false)
+  }, [nodes, setNodes])
+
+  // Handle role created from modal
+  const handleRoleCreated = useCallback((roleName: string, inheritedRoles: string[], assignedUsers: string[]) => {
+    const businessRoleCount = nodes.filter(n => n.type === 'role' && n.position.x === 350).length
+    const newRoleNode: Node = {
+      id: `role-${roleName}`,
+      type: 'role',
+      position: { x: 350, y: 50 + businessRoleCount * 80 },
+      data: { label: roleName, type: 'business', isSystem: false, isNew: true },
+    }
+
+    // Update add-role-button position
+    setNodes((nds) => {
+      const filtered = nds.filter(n => n.id !== 'add-role-button')
+      return [
+        ...filtered,
+        newRoleNode,
+        {
+          id: 'add-role-button',
+          type: 'addButton',
+          position: { x: 350, y: 50 + (businessRoleCount + 1) * 80 },
+          data: { label: 'Add Business Role', type: 'role', onClick: () => {} },
+          selectable: false,
+          draggable: false,
+        },
+      ]
+    })
+
+    // Add pending change for creating the role
+    setPendingChanges((prev) => [
+      ...prev,
+      {
+        id: roleName,
+        type: 'create_role',
+        roleName,
+      },
+    ])
+
+    // Add edges for inherited roles
+    if (inheritedRoles.length > 0) {
+      const newEdges: Edge[] = inheritedRoles.map((parentRole, idx) => ({
+        id: `role-edge-new-${roleName}-${parentRole}-${idx}`,
+        source: `role-${parentRole}`,
+        target: `role-${roleName}`,
+        style: { stroke: '#6b7280', strokeDasharray: '5,5' },
+      }))
+      setEdges((eds) => [...eds, ...newEdges])
+    }
+
+    // Add edges for assigned users
+    if (assignedUsers.length > 0) {
+      const newEdges: Edge[] = assignedUsers.map((user, idx) => ({
+        id: `pending-${user}-${roleName}-new-${idx}`,
+        source: `user-${user}`,
+        target: `role-${roleName}`,
+        animated: true,
+        style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
+      }))
+      setEdges((eds) => [...eds, ...newEdges])
+    }
+
+    setShowAddRoleModal(false)
+  }, [nodes, setNodes, setEdges])
+
   const submitChangeset = async () => {
     if (!connectionId || pendingChanges.length === 0) return
 
@@ -393,33 +587,63 @@ export default function CanvasPage() {
     try {
       const token = await getToken()
 
-      // Create changeset with all pending changes (grants and revokes)
-      const changes = pendingChanges.map((change) => ({
-        change_type: change.type === 'grant_role' ? 'grant' : 'revoke',
-        object_type: 'role_assignment',
-        object_name: `${change.userName} -> ${change.roleName}`,
-        details: {
-          user_name: change.userName,
-          role_name: change.roleName,
-        },
-      }))
+      // Create changeset with all pending changes
+      const changes = pendingChanges.map((change) => {
+        if (change.type === 'create_user' && change.userDetails) {
+          const d = change.userDetails
+          return {
+            change_type: 'create_user',
+            object_type: 'user',
+            object_name: d.userName,
+            details: {
+              login_name: d.loginName || d.userName,
+              email: d.email || '',
+              password: d.password || '',
+              first_name: d.firstName || '',
+              last_name: d.lastName || '',
+              display_name: d.displayName || '',
+              comment: d.comment || '',
+              default_namespace: d.defaultNamespace || '',
+              must_change_password: d.mustChangePassword,
+            },
+          }
+        } else if (change.type === 'create_role') {
+          return {
+            change_type: 'create_role',
+            object_type: 'role',
+            object_name: change.roleName,
+            details: {},
+          }
+        } else {
+          return {
+            change_type: change.type === 'grant_role' ? 'grant' : 'revoke',
+            object_type: 'role_assignment',
+            object_name: `${change.userName} -> ${change.roleName}`,
+            details: {
+              user_name: change.userName,
+              role_name: change.roleName,
+            },
+          }
+        }
+      })
 
+      const createUserCount = pendingChanges.filter(c => c.type === 'create_user').length
+      const createRoleCount = pendingChanges.filter(c => c.type === 'create_role').length
       const grantCount = pendingChanges.filter(c => c.type === 'grant_role').length
       const revokeCount = pendingChanges.filter(c => c.type === 'revoke_role').length
 
-      let title = ''
-      if (grantCount > 0 && revokeCount > 0) {
-        title = `Role changes (${grantCount} grants, ${revokeCount} revokes)`
-      } else if (grantCount > 0) {
-        title = `Grant roles to users (${grantCount} changes)`
-      } else {
-        title = `Revoke roles from users (${revokeCount} changes)`
-      }
+      const parts = []
+      if (createUserCount > 0) parts.push(`${createUserCount} new user${createUserCount > 1 ? 's' : ''}`)
+      if (createRoleCount > 0) parts.push(`${createRoleCount} new role${createRoleCount > 1 ? 's' : ''}`)
+      if (grantCount > 0) parts.push(`${grantCount} grant${grantCount > 1 ? 's' : ''}`)
+      if (revokeCount > 0) parts.push(`${revokeCount} revoke${revokeCount > 1 ? 's' : ''}`)
+
+      const title = `Access Canvas changes (${parts.join(', ')})`
 
       await api.post('/changesets', {
         connection_id: connectionId,
         title,
-        description: `Role assignments modified from Access Canvas`,
+        description: `Changes from Access Canvas`,
         changes,
       }, token || undefined)
 
@@ -479,6 +703,7 @@ export default function CanvasPage() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onConnect={onConnect}
+            onNodeClick={onNodeClick}
             onEdgeClick={onEdgeClick}
             nodeTypes={nodeTypes}
             fitView
@@ -505,6 +730,10 @@ export default function CanvasPage() {
             <CardContent className="space-y-3">
               {pendingChanges.map((change) => {
                 const isRevoke = change.type === 'revoke_role'
+                const isCreateUser = change.type === 'create_user'
+                const isCreateRole = change.type === 'create_role'
+                const isCreate = isCreateUser || isCreateRole
+
                 return (
                   <div
                     key={change.id}
@@ -520,14 +749,34 @@ export default function CanvasPage() {
                       <Plus className="h-4 w-4 text-green-600 flex-shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1">
-                        <span className="font-medium truncate">{change.userName}</span>
-                        <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
-                        <span className="font-medium truncate">{change.roleName}</span>
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {isRevoke ? 'Revoke role' : 'Grant role'}
-                      </div>
+                      {isCreate ? (
+                        <>
+                          <div className="flex items-center gap-1">
+                            {isCreateUser ? (
+                              <User className="h-3 w-3 text-blue-600 flex-shrink-0" />
+                            ) : (
+                              <Shield className="h-3 w-3 text-green-600 flex-shrink-0" />
+                            )}
+                            <span className="font-medium truncate">
+                              {isCreateUser ? change.userName : change.roleName}
+                            </span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {isCreateUser ? 'Create user' : 'Create role'}
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-1">
+                            <span className="font-medium truncate">{change.userName}</span>
+                            <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                            <span className="font-medium truncate">{change.roleName}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {isRevoke ? 'Revoke role' : 'Grant role'}
+                          </div>
+                        </>
+                      )}
                     </div>
                     <button
                       onClick={() => removePendingChange(change.id, change.type)}
@@ -590,6 +839,23 @@ export default function CanvasPage() {
           </Card>
         )}
       </div>
+
+      {/* Modals */}
+      {showAddUserModal && connectionId && (
+        <AddUserModal
+          connectionId={connectionId}
+          onClose={() => setShowAddUserModal(false)}
+          onUserCreated={handleUserCreated}
+        />
+      )}
+
+      {showAddRoleModal && connectionId && (
+        <AddRoleModal
+          connectionId={connectionId}
+          onClose={() => setShowAddRoleModal(false)}
+          onRoleCreated={handleRoleCreated}
+        />
+      )}
     </div>
   )
 }

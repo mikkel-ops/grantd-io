@@ -82,12 +82,32 @@ def _generate_snowflake_sql(
         case "create_user":
             login_name = details.get("login_name", object_name)
             email = details.get("email", "")
-            default_role = details.get("default_role", "")
-            sql = f"CREATE USER IF NOT EXISTS {object_name} LOGIN_NAME = '{login_name}'"
+            password = details.get("password", "")
+            first_name = details.get("first_name", "")
+            last_name = details.get("last_name", "")
+            display_name = details.get("display_name", "")
+            comment = details.get("comment", "")
+            default_namespace = details.get("default_namespace", "")
+            must_change_password = details.get("must_change_password", True)
+
+            sql = f"CREATE USER IF NOT EXISTS {object_name}"
+            sql += f" LOGIN_NAME = '{login_name}'"
+            if password:
+                sql += f" PASSWORD = '{password}'"
+                if must_change_password:
+                    sql += " MUST_CHANGE_PASSWORD = TRUE"
             if email:
                 sql += f" EMAIL = '{email}'"
-            if default_role:
-                sql += f" DEFAULT_ROLE = {default_role}"
+            if first_name:
+                sql += f" FIRST_NAME = '{first_name}'"
+            if last_name:
+                sql += f" LAST_NAME = '{last_name}'"
+            if display_name:
+                sql += f" DISPLAY_NAME = '{display_name}'"
+            if comment:
+                sql += f" COMMENT = '{comment}'"
+            if default_namespace:
+                sql += f" DEFAULT_NAMESPACE = '{default_namespace}'"
             return sql + ";"
 
         case "drop_user":
