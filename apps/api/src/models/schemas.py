@@ -102,6 +102,7 @@ class PlatformRoleResponse(BaseModel):
     name: str
     description: str | None = None
     is_system: bool | None = False
+    role_type: str | None = None  # 'functional', 'business', or 'hybrid'
     member_count: int | None = 0
     grant_count: int | None = 0
     platform_data: dict[str, Any] | None = None
@@ -216,6 +217,10 @@ class SyncStatusResponse(BaseModel):
     roles_synced: int
     grants_synced: int
     error_message: str | None
+    # Progress tracking
+    current_step: str | None = None
+    current_step_number: int | None = 0
+    total_steps: int | None = 8
 
     class Config:
         from_attributes = True

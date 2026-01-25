@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Building2, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info, RefreshCw, Settings, Clock, ShieldCheck, ShieldX } from 'lucide-react'
+import { Building2, Plus, Snowflake, CheckCircle, XCircle, Loader2, Copy, ChevronDown, ChevronUp, Info, RefreshCw, Settings, Clock, ShieldCheck, ShieldX, Zap } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 
@@ -34,6 +34,19 @@ interface TestResult {
     role?: string
     warehouse?: string
   }
+}
+
+interface SyncProgress {
+  id: string
+  connection_id: string
+  status: string
+  current_step: string | null
+  current_step_number: number
+  total_steps: number
+  users_synced: number
+  roles_synced: number
+  grants_synced: number
+  error_message: string | null
 }
 
 const platforms: { id: Platform; name: string; available: boolean }[] = [
@@ -138,6 +151,7 @@ export default function ConnectionsPage() {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   const [loadingConnections, setLoadingConnections] = useState(true)
   const [syncingConnectionId, setSyncingConnectionId] = useState<string | null>(null)
+  const [syncProgress, setSyncProgress] = useState<SyncProgress | null>(null)
   const [selectedConnection, setSelectedConnection] = useState<Connection | null>(null)
 
   // Load existing connections on mount
@@ -261,16 +275,59 @@ export default function ConnectionsPage() {
 
   const handleSyncConnection = async (connectionId: string) => {
     setSyncingConnectionId(connectionId)
+    // Show initial progress state immediately
+    setSyncProgress({
+      id: '',
+      connection_id: connectionId,
+      status: 'running',
+      current_step: 'Starting sync...',
+      current_step_number: 0,
+      total_steps: 8,
+      users_synced: 0,
+      roles_synced: 0,
+      grants_synced: 0,
+      error_message: null,
+    })
+
     try {
       const token = await getToken()
       await api.post(`/connections/${connectionId}/sync`, {}, token || undefined)
-      // Reload connections to get updated sync status
-      const data = await api.get<Connection[]>('/connections', token || undefined)
-      setConnections(data)
+
+      // Poll for progress
+      const pollProgress = async () => {
+        try {
+          const progress = await api.get<SyncProgress>(
+            `/sync/progress/${connectionId}`,
+            token || undefined
+          )
+          setSyncProgress(progress)
+
+          // Continue polling if still running
+          if (progress.status === 'running') {
+            setTimeout(pollProgress, 300) // Poll every 300ms for smoother updates
+          } else {
+            // Sync complete - reload connections
+            const data = await api.get<Connection[]>('/connections', token || undefined)
+            setConnections(data)
+            // Keep syncing state true longer so user can see the completed state
+            setTimeout(() => {
+              setSyncingConnectionId(null)
+              setSyncProgress(null)
+            }, 4000) // Show completed state for 4 seconds
+          }
+        } catch (error) {
+          console.error('Failed to get sync progress:', error)
+          setSyncingConnectionId(null)
+          setSyncProgress(null)
+        }
+      }
+
+      // Start polling immediately (no delay)
+      pollProgress()
     } catch (error) {
       console.error('Failed to sync connection:', error)
-    } finally {
       setSyncingConnectionId(null)
+      setSyncProgress(null)
     }
   }
 
@@ -705,74 +762,123 @@ MIIEvgIBADANBgkqhkiG9w...
         </Card>
       ) : connections.length > 0 ? (
         <div className="grid gap-4">
-          {connections.map((connection) => (
+          {connections.map((connection) => {
+            const isThisSyncing = syncingConnectionId === connection.id
+            const progress = isThisSyncing ? syncProgress : null
+            const progressPercent = progress
+              ? Math.round((progress.current_step_number / progress.total_steps) * 100)
+              : 0
+
+            return (
             <Card key={connection.id}>
-              <CardContent className="flex items-center justify-between p-6">
-                <div className="flex items-center gap-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Snowflake className="h-5 w-5" />
+              <CardContent className="p-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                      <Snowflake className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="font-medium">{connection.name}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {connection.platform} • {connection.sync_enabled ? 'Sync enabled' : 'Sync disabled'}
+                      </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="font-medium">{connection.name}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {connection.platform} • {connection.sync_enabled ? 'Sync enabled' : 'Sync disabled'}
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-4">
-                  {/* Sync status and last sync time */}
-                  <div className="flex items-center gap-3 text-sm">
-                    {connection.last_sync_status === 'success' ? (
-                      <span className="flex items-center text-green-600">
-                        <CheckCircle className="h-4 w-4 mr-1" />
-                        Synced
-                      </span>
-                    ) : connection.last_sync_status === 'failed' ? (
-                      <span className="flex items-center text-red-600">
-                        <XCircle className="h-4 w-4 mr-1" />
-                        Failed
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">Not synced</span>
-                    )}
-                    <span className="flex items-center text-muted-foreground">
-                      <Clock className="h-4 w-4 mr-1" />
-                      {formatLastSync(connection.last_sync_at)}
-                    </span>
-                  </div>
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleSyncConnection(connection.id)}
-                      disabled={syncingConnectionId === connection.id}
-                    >
-                      {syncingConnectionId === connection.id ? (
-                        <>
-                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                          Syncing...
-                        </>
+                  <div className="flex items-center gap-4">
+                    {/* Sync status and last sync time */}
+                    <div className="flex items-center gap-3 text-sm">
+                      {connection.last_sync_status === 'success' ? (
+                        <span className="flex items-center text-green-600">
+                          <CheckCircle className="h-4 w-4 mr-1" />
+                          Synced
+                        </span>
+                      ) : connection.last_sync_status === 'failed' ? (
+                        <span className="flex items-center text-red-600">
+                          <XCircle className="h-4 w-4 mr-1" />
+                          Failed
+                        </span>
                       ) : (
-                        <>
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                          Sync
-                        </>
+                        <span className="text-muted-foreground">Not synced</span>
                       )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedConnection(connection)}
-                    >
-                      <Settings className="h-4 w-4 mr-1" />
-                      Configure
-                    </Button>
+                      <span className="flex items-center text-muted-foreground">
+                        <Clock className="h-4 w-4 mr-1" />
+                        {formatLastSync(connection.last_sync_at)}
+                      </span>
+                    </div>
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleSyncConnection(connection.id)}
+                        disabled={isThisSyncing}
+                      >
+                        {isThisSyncing ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                            Syncing...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            Sync
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedConnection(connection)}
+                      >
+                        <Settings className="h-4 w-4 mr-1" />
+                        Configure
+                      </Button>
+                    </div>
                   </div>
                 </div>
+
+                {/* Sync Progress Bar */}
+                {isThisSyncing && progress && (
+                  <div className="mt-4 space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className={`flex items-center gap-2 ${progress.status === 'completed' ? 'text-green-600' : progress.status === 'failed' ? 'text-red-600' : 'text-primary'}`}>
+                        {progress.status === 'completed' ? (
+                          <CheckCircle className="h-4 w-4" />
+                        ) : progress.status === 'failed' ? (
+                          <XCircle className="h-4 w-4" />
+                        ) : (
+                          <Zap className="h-4 w-4" />
+                        )}
+                        {progress.status === 'completed' ? 'Sync completed!' : progress.status === 'failed' ? 'Sync failed' : (progress.current_step || 'Starting...')}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {progress.status === 'completed' ? 'Done' : `Step ${progress.current_step_number} of ${progress.total_steps}`}
+                      </span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div
+                        className={`h-full transition-all duration-300 ease-out ${progress.status === 'completed' ? 'bg-green-500' : progress.status === 'failed' ? 'bg-red-500' : 'bg-primary'}`}
+                        style={{ width: progress.status === 'completed' ? '100%' : `${progressPercent}%` }}
+                      />
+                    </div>
+                    {progress.status === 'completed' && (
+                      <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                        <span>{progress.users_synced} users</span>
+                        <span>{progress.roles_synced} roles</span>
+                        <span>{progress.grants_synced} grants</span>
+                      </div>
+                    )}
+                    {progress.status === 'failed' && progress.error_message && (
+                      <div className="text-xs text-red-600">
+                        {progress.error_message}
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
-          ))}
+            )
+          })}
 
           {/* Configuration Panel */}
           {selectedConnection && (

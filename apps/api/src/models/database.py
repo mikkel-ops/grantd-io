@@ -190,6 +190,7 @@ class PlatformRole(Base):
     name = Column(Text, nullable=False)
     description = Column(Text)
     is_system = Column(Boolean, default=False)
+    role_type = Column(Text)  # 'functional', 'business', or 'hybrid'
     created_on = Column(DateTime(timezone=True))
     member_count = Column(Integer, default=0)
     grant_count = Column(Integer, default=0)
@@ -352,3 +353,8 @@ class SyncRun(Base):
     drift_detected = Column(Integer, default=0)
     error_message = Column(Text)
     error_details = Column(JSONB)
+    # Progress tracking
+    current_step = Column(Text)  # Current step name (e.g., "Syncing roles")
+    total_steps = Column(Integer, default=8)
+    current_step_number = Column(Integer, default=0)
+    step_progress = Column(JSONB)  # Detailed step info

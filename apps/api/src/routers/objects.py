@@ -1,3 +1,4 @@
+from enum import Enum
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, status
@@ -93,6 +94,88 @@ class PlatformWarehouseResponse(BaseModel):
     grant_count: int
     roles_with_access: list[str]
     privileges: list[str]
+
+
+# ============================================================================
+# Role Details Models (for enhanced Roles page)
+# ============================================================================
+
+class RoleType(str, Enum):
+    """Inferred role type based on configuration patterns."""
+    FUNCTIONAL = "functional"
+    BUSINESS = "business"
+    HYBRID = "hybrid"
+
+
+class RoleHierarchyNode(BaseModel):
+    """A role in the hierarchy tree."""
+    name: str
+    is_system: bool = False
+
+
+class RoleAccessSummaryCompact(BaseModel):
+    """Compact access summary for role cards."""
+    databases: list[str]  # First 3 database names for chips
+    total_databases: int
+    total_schemas: int
+    total_privileges: int
+
+
+class RoleDetailResponse(BaseModel):
+    """Detailed information for a single role - loaded on expand."""
+    role_name: str
+    role_type: RoleType
+    role_type_reason: str  # Human-readable explanation
+
+    # Hierarchy
+    parent_roles: list[RoleHierarchyNode]  # Roles this role inherits FROM
+    child_roles: list[RoleHierarchyNode]   # Roles that inherit FROM this role
+
+    # Access summary
+    access_summary: RoleAccessSummaryCompact
+
+    # Full access map (forward reference to DatabaseAccessDetail defined later)
+    access_map: list["DatabaseAccessDetail"]
+
+    # Counts for display
+    user_assignment_count: int
+    role_assignment_count: int  # Roles assigned to this role (as child)
+
+
+def infer_role_type(
+    has_data_grants: bool,
+    user_assignment_count: int,
+    parent_role_count: int,
+) -> tuple[RoleType, str]:
+    """
+    Infer role type based on configuration patterns.
+
+    Returns (role_type, reason_string)
+    """
+    # Functional: Has direct DB/schema/table grants, no user assignments
+    is_functional_pattern = has_data_grants and user_assignment_count == 0
+
+    # Business: Inherits from roles, assigned to users, no direct data grants
+    is_business_pattern = parent_role_count > 0 and user_assignment_count > 0 and not has_data_grants
+
+    if is_functional_pattern and not is_business_pattern:
+        return (
+            RoleType.FUNCTIONAL,
+            "Direct data grants, no user assignments"
+        )
+    elif is_business_pattern and not is_functional_pattern:
+        return (
+            RoleType.BUSINESS,
+            f"Inherits from {parent_role_count} role(s), assigned to {user_assignment_count} user(s)"
+        )
+    elif has_data_grants and (user_assignment_count > 0 or parent_role_count > 0):
+        return (
+            RoleType.HYBRID,
+            "Mix of direct grants and role inheritance/user assignments"
+        )
+    else:
+        # Default to business if no clear pattern (no grants, just a container role)
+        return (RoleType.BUSINESS, "No direct data grants")
 
 
 router = APIRouter(prefix="/objects")
@@ -249,6 +332,179 @@ async def get_role_assignments(
     ).scalars().all()
 
     return assignments
+
+
+@router.get("/roles/{role_name}/details", response_model=RoleDetailResponse)
+async def get_role_details(
+    role_name: str,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """
+    Get detailed information for a specific role including:
+    - Inferred role type (functional/business/hybrid)
+    - Role hierarchy (parents and children)
+    - Access summary and full access map
+
+    This is designed to be called on-demand when a user expands a role card.
+    """
+    verify_connection_access(db, connection_id, org_id)
+
+    # 1. Get the role to verify it exists
+    role = db.execute(
+        select(PlatformRole).where(
+            PlatformRole.connection_id == connection_id,
+            PlatformRole.name == role_name,
+        )
+    ).scalar_one_or_none()
+
+    if not role:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Role not found",
+        )
+
+    # 2. Get all role assignments to build hierarchy
+    all_assignments = db.execute(
+        select(RoleAssignment).where(RoleAssignment.connection_id == connection_id)
+    ).scalars().all()
+
+    # 3. Get all roles for is_system lookup
+    all_roles = db.execute(
+        select(PlatformRole).where(PlatformRole.connection_id == connection_id)
+    ).scalars().all()
+    role_info = {r.name: r for r in all_roles}
+
+    # 4. Build parent roles (roles this role inherits FROM)
+    # When assignee_type="ROLE" and assignee_name=our_role, role_name is what we inherit from
+    parent_roles = []
+    for assignment in all_assignments:
+        if (assignment.assignee_type.upper() == "ROLE" and
+            assignment.assignee_name.upper() == role_name.upper()):
+            parent_info = role_info.get(assignment.role_name)
+            parent_roles.append(RoleHierarchyNode(
+                name=assignment.role_name,
+                is_system=parent_info.is_system if parent_info else False,
+            ))
+
+    # 5. Build child roles (roles that inherit FROM this role)
+    # When role_name=our_role and assignee_type="ROLE", assignee_name is a child
+    child_roles = []
+    for assignment in all_assignments:
+        if (assignment.role_name.upper() == role_name.upper() and
+            assignment.assignee_type.upper() == "ROLE"):
+            child_info = role_info.get(assignment.assignee_name)
+            child_roles.append(RoleHierarchyNode(
+                name=assignment.assignee_name,
+                is_system=child_info.is_system if child_info else False,
+            ))
+
+    # 6. Count user assignments
+    user_assignment_count = sum(
+        1 for a in all_assignments
+        if a.role_name.upper() == role_name.upper() and a.assignee_type.upper() == "USER"
+    )
+
+    # 7. Get grants and build access map
+    grants = db.execute(
+        select(PlatformGrant).where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.grantee_name == role_name,
+            PlatformGrant.grantee_type == "ROLE",
+        )
+    ).scalars().all()
+
+    # Build access map structure
+    unique_dbs: set[str] = set()
+    unique_schemas: set[str] = set()
+    has_data_grants = False
+    access_data: dict[str, dict] = {}
+
+    for grant in grants:
+        obj_type = grant.object_type.upper() if grant.object_type else ""
+        db_name = grant.object_database
+        schema_name = grant.object_schema
+        privilege = grant.privilege
+
+        # Skip warehouse grants for access map (they don't represent data access)
+        if obj_type == "WAREHOUSE":
+            continue
+
+        if db_name:
+            unique_dbs.add(db_name)
+            has_data_grants = True
+
+            if db_name not in access_data:
+                access_data[db_name] = {"privileges": set(), "schemas": {}}
+
+            if obj_type == "DATABASE":
+                access_data[db_name]["privileges"].add(privilege)
+
+            if schema_name:
+                unique_schemas.add(f"{db_name}.{schema_name}")
+                if schema_name not in access_data[db_name]["schemas"]:
+                    access_data[db_name]["schemas"][schema_name] = {
+                        "privileges": set(),
+                        "tables": 0,
+                        "views": 0,
+                    }
+                if obj_type == "SCHEMA":
+                    access_data[db_name]["schemas"][schema_name]["privileges"].add(privilege)
+                elif obj_type == "TABLE":
+                    access_data[db_name]["schemas"][schema_name]["tables"] += 1
+                elif obj_type == "VIEW":
+                    access_data[db_name]["schemas"][schema_name]["views"] += 1
+
+    # Convert to response format (using forward-referenced models)
+    # Import here to avoid circular reference issues
+    from src.routers.objects import SchemaAccessDetail, DatabaseAccessDetail
+
+    access_map = []
+    for db_name in sorted(access_data.keys()):
+        db_info = access_data[db_name]
+        schemas_list = []
+        for schema_name in sorted(db_info["schemas"].keys()):
+            schema_info = db_info["schemas"][schema_name]
+            schemas_list.append(SchemaAccessDetail(
+                name=schema_name,
+                table_count=schema_info["tables"],
+                view_count=schema_info["views"],
+                privileges=sorted(list(schema_info["privileges"])),
+            ))
+        access_map.append(DatabaseAccessDetail(
+            name=db_name,
+            privileges=sorted(list(db_info["privileges"])),
+            schemas=schemas_list,
+        ))
+
+    # 8. Infer role type
+    role_type, reason = infer_role_type(
+        has_data_grants=has_data_grants,
+        user_assignment_count=user_assignment_count,
+        parent_role_count=len(parent_roles),
+    )
+
+    # 9. Build compact access summary (first 3 DBs)
+    sorted_dbs = sorted(list(unique_dbs))
+    access_summary = RoleAccessSummaryCompact(
+        databases=sorted_dbs[:3],
+        total_databases=len(unique_dbs),
+        total_schemas=len(unique_schemas),
+        total_privileges=len(grants),
+    )
+
+    return RoleDetailResponse(
+        role_name=role_name,
+        role_type=role_type,
+        role_type_reason=reason,
+        parent_roles=parent_roles,
+        child_roles=child_roles,
+        access_summary=access_summary,
+        access_map=access_map,
+        user_assignment_count=user_assignment_count,
+        role_assignment_count=len(child_roles),
+    )
 
 
 @router.get("/grants", response_model=list[PlatformGrantResponse])
