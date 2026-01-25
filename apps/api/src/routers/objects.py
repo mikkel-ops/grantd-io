@@ -314,6 +314,25 @@ async def list_roles(
     return roles
 
 
+@router.get("/role-assignments", response_model=list[RoleAssignmentResponse])
+async def list_all_role_assignments(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+    limit: int = Query(1000, le=5000),
+):
+    """Get all role assignments for a connection."""
+    verify_connection_access(db, connection_id, org_id)
+
+    assignments = db.execute(
+        select(RoleAssignment)
+        .where(RoleAssignment.connection_id == connection_id)
+        .limit(limit)
+    ).scalars().all()
+
+    return assignments
+
+
 @router.get("/roles/{role_name}/assignments", response_model=list[RoleAssignmentResponse])
 async def get_role_assignments(
     role_name: str,

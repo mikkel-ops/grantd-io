@@ -11,6 +11,7 @@ import {
   Menu,
   Warehouse,
   Building2,
+  Network,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -18,6 +19,7 @@ import { useState } from 'react'
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Accounts', href: '/connections', icon: Building2 },
+  { name: 'Canvas', href: '/canvas', icon: Network },
   { name: 'Roles', href: '/roles', icon: Shield },
   { name: 'Users', href: '/users', icon: Users },
   { name: 'Warehouses', href: '/warehouses', icon: Warehouse },

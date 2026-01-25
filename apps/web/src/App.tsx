@@ -15,6 +15,7 @@ import UsersPage from '@/pages/UsersPage'
 import UserDesignerPage from '@/pages/UserDesignerPage'
 import UserAccessPage from '@/pages/UserAccessPage'
 import ChangesetsPage from '@/pages/ChangesetsPage'
+import CanvasPage from '@/pages/CanvasPage'
 import SettingsPage from '@/pages/SettingsPage'
 
 // Layout
@@ -65,6 +66,7 @@ function App() {
           <Route path="users/designer" element={<UserDesignerPage />} />
           <Route path="users/:userName/access" element={<UserAccessPage />} />
           <Route path="changesets" element={<ChangesetsPage />} />
+          <Route path="canvas" element={<CanvasPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 
