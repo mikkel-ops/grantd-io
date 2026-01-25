@@ -33,13 +33,16 @@ export default function CanvasPage() {
   const { getToken } = useAuth()
   const navigate = useNavigate()
 
+  // Filter state
+  const [showSystemObjects, setShowSystemObjects] = useState(false)
+
   // Load canvas data
   const {
     loading,
     connectionId,
     initialNodes,
     initialEdges,
-  } = useCanvasData()
+  } = useCanvasData(showSystemObjects)
 
   // Canvas state
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
@@ -261,7 +264,12 @@ export default function CanvasPage() {
         </p>
       </div>
 
-      <CanvasLegend focusedRole={focusedRole} onClearFocus={clearFocus} />
+      <CanvasLegend
+        focusedRole={focusedRole}
+        onClearFocus={clearFocus}
+        showSystemObjects={showSystemObjects}
+        onToggleSystemObjects={setShowSystemObjects}
+      />
 
       <div className="flex gap-4 h-[calc(100vh-220px)]">
         <div

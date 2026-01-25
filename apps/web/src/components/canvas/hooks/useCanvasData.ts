@@ -95,7 +95,7 @@ interface UseCanvasDataResult {
   initialEdges: Edge[]
 }
 
-export function useCanvasData(): UseCanvasDataResult {
+export function useCanvasData(showSystemObjects: boolean = false): UseCanvasDataResult {
   const { getToken } = useAuth()
   const [loading, setLoading] = useState(true)
   const [connectionId, setConnectionId] = useState<string | null>(null)
@@ -143,7 +143,8 @@ export function useCanvasData(): UseCanvasDataResult {
           usersData || [],
           rolesData || [],
           assignmentsData || [],
-          databasesData || []
+          databasesData || [],
+          showSystemObjects
         )
 
         setInitialNodes(nodes)
@@ -156,7 +157,7 @@ export function useCanvasData(): UseCanvasDataResult {
     }
 
     loadData()
-  }, [getToken])
+  }, [getToken, showSystemObjects])
 
   return {
     loading,
@@ -184,16 +185,17 @@ function buildCanvasLayout(
   users: PlatformUser[],
   roles: PlatformRole[],
   assignments: RoleAssignment[],
-  databases: PlatformDatabase[]
+  databases: PlatformDatabase[],
+  showSystemObjects: boolean
 ): { nodes: Node[]; edges: Edge[] } {
-  // Filter out system roles
-  const nonSystemRoles = roles.filter(r => !r.is_system)
+  // Filter out system roles unless showSystemObjects is true
+  const filteredRoles = showSystemObjects ? roles : roles.filter(r => !r.is_system)
 
   // Separate business and functional roles
-  const businessRoles = nonSystemRoles.filter(
+  const businessRoles = filteredRoles.filter(
     r => r.role_type === 'business' || r.role_type === 'hybrid' || !r.role_type
   )
-  const functionalRoles = nonSystemRoles.filter(r => r.role_type === 'functional')
+  const functionalRoles = filteredRoles.filter(r => r.role_type === 'functional')
 
   // Create user nodes
   const userNodes: Node[] = users.map((user, index) => ({
@@ -221,8 +223,11 @@ function buildCanvasLayout(
 
   const allRoleNodes = [...businessRoleNodes, ...functionalRoleNodes]
 
+  // Filter out system/imported databases unless showSystemObjects is true
+  const filteredDatabases = showSystemObjects ? databases : databases.filter(db => !db.is_imported)
+
   // Create database nodes
-  const databaseNodes: Node[] = databases.map((db, index) => ({
+  const databaseNodes: Node[] = filteredDatabases.map((db, index) => ({
     id: `db-${db.name}`,
     type: 'database',
     position: { x: LAYOUT.DATABASE_X, y: LAYOUT.START_Y + index * LAYOUT.ROW_HEIGHT },

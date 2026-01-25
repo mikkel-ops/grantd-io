@@ -3,6 +3,8 @@ import { X } from 'lucide-react'
 interface CanvasLegendProps {
   focusedRole: string | null
   onClearFocus: () => void
+  showSystemObjects: boolean
+  onToggleSystemObjects: (show: boolean) => void
 }
 
 const LEGEND_ITEMS = [
@@ -13,7 +15,12 @@ const LEGEND_ITEMS = [
   { color: 'bg-amber-400', label: 'Hybrid Roles' },
 ]
 
-export default function CanvasLegend({ focusedRole, onClearFocus }: CanvasLegendProps) {
+export default function CanvasLegend({
+  focusedRole,
+  onClearFocus,
+  showSystemObjects,
+  onToggleSystemObjects,
+}: CanvasLegendProps) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-6 text-sm">
@@ -23,16 +30,29 @@ export default function CanvasLegend({ focusedRole, onClearFocus }: CanvasLegend
             <span>{label}</span>
           </div>
         ))}
-        {focusedRole && (
-          <div className="ml-auto flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1">
-            <span className="text-purple-700">
-              Viewing access for: <strong>{focusedRole}</strong>
-            </span>
-            <button onClick={onClearFocus} className="p-0.5 rounded hover:bg-purple-100">
-              <X className="h-4 w-4 text-purple-600" />
-            </button>
-          </div>
-        )}
+
+        <div className="ml-auto flex items-center gap-4">
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showSystemObjects}
+              onChange={(e) => onToggleSystemObjects(e.target.checked)}
+              className="rounded border-gray-300"
+            />
+            Show system objects
+          </label>
+
+          {focusedRole && (
+            <div className="flex items-center gap-2 bg-purple-50 border border-purple-200 rounded-lg px-3 py-1">
+              <span className="text-purple-700">
+                Viewing access for: <strong>{focusedRole}</strong>
+              </span>
+              <button onClick={onClearFocus} className="p-0.5 rounded hover:bg-purple-100">
+                <X className="h-4 w-4 text-purple-600" />
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {!focusedRole && (
