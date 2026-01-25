@@ -226,15 +226,17 @@ function buildCanvasLayout(
   // Filter out system/imported databases unless showSystemObjects is true
   const filteredDatabases = showSystemObjects ? databases : databases.filter(db => !db.is_imported)
 
-  // Create database nodes
+  // Create database nodes (using databaseGroup type for expandable behavior)
   const databaseNodes: Node[] = filteredDatabases.map((db, index) => ({
     id: `db-${db.name}`,
-    type: 'database',
+    type: 'databaseGroup',
     position: { x: LAYOUT.DATABASE_X, y: LAYOUT.START_Y + index * LAYOUT.ROW_HEIGHT },
     data: {
       label: db.name,
       schemaCount: db.schema_count,
       isImported: db.is_imported,
+      isExpanded: false,
+      schemas: [],
     },
   }))
 

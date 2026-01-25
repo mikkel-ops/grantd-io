@@ -579,6 +579,42 @@ async def list_databases(
     return databases
 
 
+class SchemaResponse(BaseModel):
+    name: str
+    full_name: str
+
+
+@router.get("/databases/{database_name}/schemas", response_model=list[SchemaResponse])
+async def list_database_schemas(
+    database_name: str,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """List all schemas for a specific database."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get unique schemas for this database from grants
+    schema_query = db.execute(
+        select(distinct(PlatformGrant.object_schema))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_database.ilike(database_name),
+            PlatformGrant.object_schema.isnot(None),
+        )
+    ).scalars().all()
+
+    schemas = []
+    for schema_name in sorted(schema_query):
+        if schema_name:
+            schemas.append(SchemaResponse(
+                name=schema_name,
+                full_name=f"{database_name}.{schema_name}",
+            ))
+
+    return schemas
+
+
 @router.get("/grants", response_model=list[PlatformGrantResponse])
 async def list_grants(
     connection_id: UUID,

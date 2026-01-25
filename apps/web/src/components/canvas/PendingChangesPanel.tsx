@@ -1,4 +1,4 @@
-import { User, Shield, Plus, Minus, Trash2, FileText, ArrowRight, Loader2 } from 'lucide-react'
+import { User, Shield, Plus, Minus, Trash2, FileText, ArrowRight, Loader2, Database, Key } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { PendingChange } from './hooks'
@@ -75,16 +75,21 @@ function PendingChangeItem({
   const isRevoke = change.type === 'revoke_role'
   const isCreateUser = change.type === 'create_user'
   const isCreateRole = change.type === 'create_role'
+  const isGrantPrivilege = change.type === 'grant_privilege'
   const isCreate = isCreateUser || isCreateRole
 
   return (
     <div
       className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
-        isRevoke ? 'bg-red-50 border border-red-200' : 'bg-green-50 border border-green-200'
+        isRevoke ? 'bg-red-50 border border-red-200' :
+        isGrantPrivilege ? 'bg-cyan-50 border border-cyan-200' :
+        'bg-green-50 border border-green-200'
       }`}
     >
       {isRevoke ? (
         <Minus className="h-4 w-4 text-red-600 flex-shrink-0" />
+      ) : isGrantPrivilege ? (
+        <Key className="h-4 w-4 text-cyan-600 flex-shrink-0" />
       ) : (
         <Plus className="h-4 w-4 text-green-600 flex-shrink-0" />
       )}
@@ -105,6 +110,19 @@ function PendingChangeItem({
               {isCreateUser ? 'Create user' : 'Create role'}
             </div>
           </>
+        ) : isGrantPrivilege ? (
+          <>
+            <div className="flex items-center gap-1">
+              <Shield className="h-3 w-3 text-green-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.roleName}</span>
+              <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <Database className="h-3 w-3 text-cyan-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.databaseName}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {change.privilegeGrants?.length || 0} privilege(s): {change.privilegeGrants?.map(g => g.privilege).join(', ')}
+            </div>
+          </>
         ) : (
           <>
             <div className="flex items-center gap-1">
@@ -121,7 +139,9 @@ function PendingChangeItem({
       <button
         onClick={onRemove}
         className={`p-1 rounded ${
-          isRevoke ? 'hover:bg-red-100 text-red-600' : 'hover:bg-green-100 text-green-600'
+          isRevoke ? 'hover:bg-red-100 text-red-600' :
+          isGrantPrivilege ? 'hover:bg-cyan-100 text-cyan-600' :
+          'hover:bg-green-100 text-green-600'
         }`}
       >
         <Trash2 className="h-4 w-4" />

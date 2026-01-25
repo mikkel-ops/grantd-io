@@ -1,7 +1,9 @@
 // Modals
 export { default as AddUserModal } from './AddUserModal'
 export { default as AddRoleModal } from './AddRoleModal'
+export { default as GrantPrivilegesModal } from './GrantPrivilegesModal'
 export type { UserDetails } from './AddUserModal'
+export type { PrivilegeGrant } from './GrantPrivilegesModal'
 
 // Canvas components
 export { default as PendingChangesPanel } from './PendingChangesPanel'

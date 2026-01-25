@@ -1,14 +1,17 @@
 import { useState, useCallback } from 'react'
 import { Node, Edge } from '@xyflow/react'
 import { UserDetails } from '../AddUserModal'
+import { PrivilegeGrant } from '../GrantPrivilegesModal'
 import { LAYOUT } from './useCanvasData'
 
 export interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role'
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege'
   userName?: string
   roleName?: string
   userDetails?: UserDetails
+  privilegeGrants?: PrivilegeGrant[]
+  databaseName?: string
 }
 
 interface UsePendingChangesResult {
@@ -17,6 +20,7 @@ interface UsePendingChangesResult {
   addRevokeRole: (userName: string, roleName: string, edgeId: string) => void
   addCreateUser: (details: UserDetails) => void
   addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[]) => void
+  addGrantPrivilege: (roleName: string, databaseName: string, grants: PrivilegeGrant[]) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
   cancelRevoke: (changeId: string) => void
@@ -168,6 +172,33 @@ export function usePendingChanges(
     }
   }, [nodes, setNodes, setEdges])
 
+  const addGrantPrivilege = useCallback((roleName: string, databaseName: string, grants: PrivilegeGrant[]) => {
+    const changeId = `priv-${roleName}-${databaseName}-${Date.now()}`
+
+    // Add visual edge from role to database
+    setEdges(eds => [
+      ...eds,
+      {
+        id: `privilege-edge-${changeId}`,
+        source: `role-${roleName}`,
+        target: `db-${databaseName}`,
+        animated: true,
+        style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
+      },
+    ])
+
+    setPendingChanges(prev => [
+      ...prev,
+      {
+        id: changeId,
+        type: 'grant_privilege',
+        roleName,
+        databaseName,
+        privilegeGrants: grants,
+      },
+    ])
+  }, [setEdges])
+
   const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
 
@@ -209,12 +240,14 @@ export function usePendingChanges(
         })
       })
       setEdges(eds => eds.filter(e => e.target !== `role-${changeId}` && e.source !== `role-${changeId}`))
+    } else if (changeType === 'grant_privilege') {
+      setEdges(eds => eds.filter(e => e.id !== `privilege-edge-${changeId}`))
     }
   }, [setEdges, setNodes])
 
   const clearAllChanges = useCallback(() => {
     setEdges(eds => {
-      const filtered = eds.filter(e => !e.id.startsWith('pending-'))
+      const filtered = eds.filter(e => !e.id.startsWith('pending-') && !e.id.startsWith('privilege-edge-'))
       return filtered.map(e => {
         if (e.id.startsWith('revoke-')) {
           return {
@@ -251,6 +284,7 @@ export function usePendingChanges(
     addRevokeRole,
     addCreateUser,
     addCreateRole,
+    addGrantPrivilege,
     removePendingChange,
     clearAllChanges,
     cancelRevoke,
