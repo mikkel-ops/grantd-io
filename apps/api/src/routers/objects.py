@@ -526,6 +526,59 @@ async def get_role_details(
     )
 
 
+class PlatformDatabaseResponse(BaseModel):
+    """Response for a database object."""
+    name: str
+    schema_count: int
+    is_imported: bool = False
+
+
+@router.get("/databases", response_model=list[PlatformDatabaseResponse])
+async def list_databases(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """List all unique databases for a connection with schema counts."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get unique databases from grants
+    db_query = db.execute(
+        select(distinct(PlatformGrant.object_database))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_database.isnot(None),
+        )
+    ).scalars().all()
+
+    # Get schema counts per database
+    databases = []
+    for db_name in sorted(db_query):
+        if not db_name:
+            continue
+
+        # Count unique schemas
+        schema_count = db.execute(
+            select(func.count(distinct(PlatformGrant.object_schema)))
+            .where(
+                PlatformGrant.connection_id == connection_id,
+                PlatformGrant.object_database == db_name,
+                PlatformGrant.object_schema.isnot(None),
+            )
+        ).scalar() or 0
+
+        # Check if imported
+        is_imported = db_name.upper() in ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+
+        databases.append(PlatformDatabaseResponse(
+            name=db_name,
+            schema_count=schema_count,
+            is_imported=is_imported,
+        ))
+
+    return databases
+
+
 @router.get("/grants", response_model=list[PlatformGrantResponse])
 async def list_grants(
     connection_id: UUID,

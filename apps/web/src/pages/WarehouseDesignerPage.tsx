@@ -75,7 +75,7 @@ export default function WarehouseDesignerPage() {
   const [selectedConnectionId, setSelectedConnectionId] = useState<string | null>(connectionIdParam)
   const [loading, setLoading] = useState(true)
   const [dataLoading, setDataLoading] = useState(false)
-  const [designerData, setDesignerData] = useState<WarehouseDesignerData | null>(null)
+  const [_designerData, setDesignerData] = useState<WarehouseDesignerData | null>(null)
 
   // Warehouse form state
   const [warehouseName, setWarehouseName] = useState(editWarehouseParam || '')
@@ -86,9 +86,9 @@ export default function WarehouseDesignerPage() {
   const [comment, setComment] = useState('')
 
   // Original values for edit mode diff
-  const [originalSize, setOriginalSize] = useState<string | null>(null)
-  const [originalAutoSuspend, setOriginalAutoSuspend] = useState<number | null>(null)
-  const [originalAutoResume, setOriginalAutoResume] = useState<boolean | null>(null)
+  const [originalSize, _setOriginalSize] = useState<string | null>(null)
+  const [originalAutoSuspend, _setOriginalAutoSuspend] = useState<number | null>(null)
+  const [originalAutoResume, _setOriginalAutoResume] = useState<boolean | null>(null)
 
   // Preview state
   const [sqlPreview, setSqlPreview] = useState<SqlPreview | null>(null)
@@ -103,7 +103,7 @@ export default function WarehouseDesignerPage() {
         if (token) {
           const data = await api.get<Connection[]>('/connections', token)
           setConnections(data)
-          if (!selectedConnectionId && data.length > 0) {
+          if (!selectedConnectionId && data.length > 0 && data[0]) {
             setSelectedConnectionId(data[0].id)
           }
         }
