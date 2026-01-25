@@ -8,7 +8,7 @@ import {
   useNodesState,
   useEdgesState,
   addEdge,
-  Connection,
+  Connection as FlowConnection,
   BackgroundVariant,
   NodeTypes,
   Handle,
@@ -17,7 +17,18 @@ import {
 import '@xyflow/react/dist/style.css'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
-import { User, Shield, Database, Loader2 } from 'lucide-react'
+import { User, Shield, Database, Loader2, Plus, Minus, Trash2, FileText, ArrowRight } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useNavigate } from 'react-router-dom'
+
+// Pending change type
+interface PendingChange {
+  id: string
+  type: 'grant_role' | 'revoke_role'
+  userName: string
+  roleName: string
+}
 
 // Custom node for Users
 function UserNode({ data }: { data: { label: string; email?: string } }) {
@@ -104,7 +115,7 @@ const nodeTypes: NodeTypes = {
   database: DatabaseNode,
 }
 
-interface Connection {
+interface ApiConnection {
   id: string
   name: string
 }
@@ -130,9 +141,13 @@ interface RoleAssignment {
 
 export default function CanvasPage() {
   const { getToken } = useAuth()
-  const [nodes, setNodes, onNodesChange] = useNodesState([])
-  const [edges, setEdges, onEdgesChange] = useEdgesState([])
+  const navigate = useNavigate()
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [loading, setLoading] = useState(true)
+  const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([])
+  const [connectionId, setConnectionId] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   // Load data and create nodes/edges
   useEffect(() => {
@@ -146,20 +161,21 @@ export default function CanvasPage() {
         }
 
         // First get the connections to find the connection_id
-        const connections = await api.get<Connection[]>('/connections', token)
+        const connections = await api.get<ApiConnection[]>('/connections', token)
         if (connections.length === 0) {
           console.log('No connections found')
           setLoading(false)
           return
         }
 
-        const connectionId = connections[0].id
+        const connId = connections[0].id
+        setConnectionId(connId)
 
         // Load users, roles, and assignments in parallel
         const [users, roles, assignments] = await Promise.all([
-          api.get<PlatformUser[]>(`/objects/users?connection_id=${connectionId}`, token),
-          api.get<PlatformRole[]>(`/objects/roles?connection_id=${connectionId}`, token),
-          api.get<RoleAssignment[]>(`/objects/role-assignments?connection_id=${connectionId}`, token),
+          api.get<PlatformUser[]>(`/objects/users?connection_id=${connId}`, token),
+          api.get<PlatformRole[]>(`/objects/roles?connection_id=${connId}`, token),
+          api.get<RoleAssignment[]>(`/objects/role-assignments?connection_id=${connId}`, token),
         ])
 
         // Filter out system roles
@@ -244,15 +260,178 @@ export default function CanvasPage() {
   }, [getToken, setNodes, setEdges])
 
   const onConnect = useCallback(
-    (params: Connection) => {
-      // When user draws a connection, add it as an edge
-      setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#3b82f6' } }, eds))
+    (params: FlowConnection) => {
+      // Only allow user -> role connections
+      if (!params.source?.startsWith('user-') || !params.target?.startsWith('role-')) {
+        return
+      }
 
-      // TODO: In the future, this would trigger an API call to create the role assignment
-      console.log('New connection:', params)
+      const userName = params.source.replace('user-', '')
+      const roleName = params.target.replace('role-', '')
+
+      // Add visual edge with pending style (dashed, green)
+      setEdges((eds) => addEdge({
+        ...params,
+        id: `pending-${userName}-${roleName}`,
+        animated: true,
+        style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
+      }, eds))
+
+      // Add to pending changes
+      setPendingChanges((prev) => [
+        ...prev,
+        {
+          id: `${userName}-${roleName}`,
+          type: 'grant_role',
+          userName,
+          roleName,
+        },
+      ])
     },
     [setEdges]
   )
+
+  const removePendingChange = useCallback((changeId: string, changeType: 'grant_role' | 'revoke_role') => {
+    setPendingChanges((prev) => prev.filter((c) => c.id !== changeId))
+
+    if (changeType === 'grant_role') {
+      // Remove the pending grant edge
+      setEdges((eds) => eds.filter((e) => !e.id.includes(changeId)))
+    } else {
+      // Restore the original edge style for revoke cancellation
+      setEdges((eds) => eds.map((e) => {
+        if (e.id === `revoke-${changeId}`) {
+          // Find the original edge and restore it
+          const [userName, roleName] = changeId.split('-')
+          return {
+            ...e,
+            id: `edge-restored-${changeId}`,
+            style: { stroke: '#3b82f6' },
+            animated: true,
+          }
+        }
+        return e
+      }))
+    }
+  }, [setEdges])
+
+  // Handle clicking on existing edges to mark/unmark them for revocation
+  const onEdgeClick = useCallback((event: React.MouseEvent, edge: Edge) => {
+    // Don't handle pending grant edges or role-to-role edges
+    if (edge.id.startsWith('pending-') || edge.id.startsWith('role-edge-')) {
+      return
+    }
+
+    // If clicking on a revoked edge, restore it
+    if (edge.id.startsWith('revoke-')) {
+      const changeId = edge.id.replace('revoke-', '')
+
+      // Remove from pending changes
+      setPendingChanges((prev) => prev.filter((c) => c.id !== changeId))
+
+      // Restore the edge to original blue style
+      setEdges((eds) => eds.map((e) => {
+        if (e.id === edge.id) {
+          return {
+            ...e,
+            id: `edge-restored-${changeId}`,
+            style: { stroke: '#3b82f6' },
+            animated: true,
+          }
+        }
+        return e
+      }))
+      return
+    }
+
+    // Extract user and role names from the edge
+    const sourceId = edge.source
+    const targetId = edge.target
+
+    if (!sourceId?.startsWith('user-') || !targetId?.startsWith('role-')) {
+      return
+    }
+
+    const userName = sourceId.replace('user-', '')
+    const roleName = targetId.replace('role-', '')
+    const changeId = `${userName}-${roleName}`
+
+    // Check if this revoke is already pending
+    if (pendingChanges.some(c => c.id === changeId && c.type === 'revoke_role')) {
+      return
+    }
+
+    // Update the edge to show it's marked for removal (red dashed line)
+    setEdges((eds) => eds.map((e) => {
+      if (e.id === edge.id) {
+        return {
+          ...e,
+          id: `revoke-${changeId}`,
+          style: { stroke: '#ef4444', strokeDasharray: '5,5', strokeWidth: 2 },
+          animated: true,
+        }
+      }
+      return e
+    }))
+
+    // Add to pending changes as revoke
+    setPendingChanges((prev) => [
+      ...prev,
+      {
+        id: changeId,
+        type: 'revoke_role',
+        userName,
+        roleName,
+      },
+    ])
+  }, [setEdges, pendingChanges])
+
+  const submitChangeset = async () => {
+    if (!connectionId || pendingChanges.length === 0) return
+
+    setSubmitting(true)
+    try {
+      const token = await getToken()
+
+      // Create changeset with all pending changes (grants and revokes)
+      const changes = pendingChanges.map((change) => ({
+        change_type: change.type === 'grant_role' ? 'grant' : 'revoke',
+        object_type: 'role_assignment',
+        object_name: `${change.userName} -> ${change.roleName}`,
+        details: {
+          user_name: change.userName,
+          role_name: change.roleName,
+        },
+      }))
+
+      const grantCount = pendingChanges.filter(c => c.type === 'grant_role').length
+      const revokeCount = pendingChanges.filter(c => c.type === 'revoke_role').length
+
+      let title = ''
+      if (grantCount > 0 && revokeCount > 0) {
+        title = `Role changes (${grantCount} grants, ${revokeCount} revokes)`
+      } else if (grantCount > 0) {
+        title = `Grant roles to users (${grantCount} changes)`
+      } else {
+        title = `Revoke roles from users (${revokeCount} changes)`
+      }
+
+      await api.post('/changesets', {
+        connection_id: connectionId,
+        title,
+        description: `Role assignments modified from Access Canvas`,
+        changes,
+      }, token || undefined)
+
+      // Clear pending changes and navigate to changesets
+      setPendingChanges([])
+      navigate('/changesets')
+    } catch (error) {
+      console.error('Failed to create changeset:', error)
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -291,21 +470,125 @@ export default function CanvasPage() {
         </div>
       </div>
 
-      <div className="h-[calc(100vh-220px)] border rounded-lg overflow-hidden bg-slate-50">
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          nodeTypes={nodeTypes}
-          fitView
-          snapToGrid
-          snapGrid={[20, 20]}
-        >
-          <Controls />
-          <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
-        </ReactFlow>
+      <div className="flex gap-4 h-[calc(100vh-220px)]">
+        {/* Canvas */}
+        <div className={`border rounded-lg overflow-hidden bg-slate-50 ${pendingChanges.length > 0 ? 'flex-1' : 'w-full'}`}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onEdgeClick={onEdgeClick}
+            nodeTypes={nodeTypes}
+            fitView
+            snapToGrid
+            snapGrid={[20, 20]}
+          >
+            <Controls />
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
+          </ReactFlow>
+        </div>
+
+        {/* Pending Changes Panel */}
+        {pendingChanges.length > 0 && (
+          <Card className="w-80 flex-shrink-0">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Pending Changes
+                <span className="ml-auto bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full text-xs">
+                  {pendingChanges.length}
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {pendingChanges.map((change) => {
+                const isRevoke = change.type === 'revoke_role'
+                return (
+                  <div
+                    key={change.id}
+                    className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
+                      isRevoke
+                        ? 'bg-red-50 border border-red-200'
+                        : 'bg-green-50 border border-green-200'
+                    }`}
+                  >
+                    {isRevoke ? (
+                      <Minus className="h-4 w-4 text-red-600 flex-shrink-0" />
+                    ) : (
+                      <Plus className="h-4 w-4 text-green-600 flex-shrink-0" />
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1">
+                        <span className="font-medium truncate">{change.userName}</span>
+                        <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                        <span className="font-medium truncate">{change.roleName}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {isRevoke ? 'Revoke role' : 'Grant role'}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => removePendingChange(change.id, change.type)}
+                      className={`p-1 rounded ${
+                        isRevoke
+                          ? 'hover:bg-red-100 text-red-600'
+                          : 'hover:bg-green-100 text-green-600'
+                      }`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )
+              })}
+
+              <div className="pt-3 border-t space-y-2">
+                <Button
+                  onClick={submitChangeset}
+                  disabled={submitting}
+                  className="w-full"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Creating...
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-4 w-4 mr-2" />
+                      Create Changeset
+                    </>
+                  )}
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    // Restore revoked edges to their original style and remove pending grants
+                    setEdges((eds) => {
+                      const filtered = eds.filter((e) => !e.id.startsWith('pending-'))
+                      return filtered.map((e) => {
+                        if (e.id.startsWith('revoke-')) {
+                          return {
+                            ...e,
+                            id: `edge-restored-${e.id.replace('revoke-', '')}`,
+                            style: { stroke: '#3b82f6' },
+                            animated: true,
+                          }
+                        }
+                        return e
+                      })
+                    })
+                    setPendingChanges([])
+                  }}
+                  className="w-full"
+                >
+                  Clear All
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   )
