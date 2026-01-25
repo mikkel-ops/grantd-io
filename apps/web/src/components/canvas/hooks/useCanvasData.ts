@@ -91,6 +91,7 @@ interface UseCanvasDataResult {
   roles: PlatformRole[]
   assignments: RoleAssignment[]
   databases: PlatformDatabase[]
+  grants: PlatformGrant[]
   initialNodes: Node[]
   initialEdges: Edge[]
 }
@@ -103,6 +104,7 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
   const [roles, setRoles] = useState<PlatformRole[]>([])
   const [assignments, setAssignments] = useState<RoleAssignment[]>([])
   const [databases, setDatabases] = useState<PlatformDatabase[]>([])
+  const [grants, setGrants] = useState<PlatformGrant[]>([])
   const [initialNodes, setInitialNodes] = useState<Node[]>([])
   const [initialEdges, setInitialEdges] = useState<Edge[]>([])
 
@@ -125,25 +127,28 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
         const connId = connections[0]!.id
         setConnectionId(connId)
 
-        // Load all data in parallel (including databases now)
-        const [usersData, rolesData, assignmentsData, databasesData] = await Promise.all([
+        // Load all data in parallel (including databases and grants now)
+        const [usersData, rolesData, assignmentsData, databasesData, grantsData] = await Promise.all([
           api.get<PlatformUser[]>(`/objects/users?connection_id=${connId}`, token),
           api.get<PlatformRole[]>(`/objects/roles?connection_id=${connId}`, token),
           api.get<RoleAssignment[]>(`/objects/role-assignments?connection_id=${connId}`, token),
           api.get<PlatformDatabase[]>(`/objects/databases?connection_id=${connId}`, token),
+          api.get<PlatformGrant[]>(`/objects/grants?connection_id=${connId}&exclude_system_roles=true&limit=500`, token),
         ])
 
         setUsers(usersData || [])
         setRoles(rolesData || [])
         setAssignments(assignmentsData || [])
         setDatabases(databasesData || [])
+        setGrants(grantsData || [])
 
-        // Build initial nodes and edges (now includes databases)
+        // Build initial nodes and edges (now includes databases and role-to-database grant edges)
         const { nodes, edges } = buildCanvasLayout(
           usersData || [],
           rolesData || [],
           assignmentsData || [],
           databasesData || [],
+          grantsData || [],
           showSystemObjects
         )
 
@@ -166,6 +171,7 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
     roles,
     assignments,
     databases,
+    grants,
     initialNodes,
     initialEdges,
   }
@@ -186,6 +192,7 @@ function buildCanvasLayout(
   roles: PlatformRole[],
   assignments: RoleAssignment[],
   databases: PlatformDatabase[],
+  grants: PlatformGrant[],
   showSystemObjects: boolean
 ): { nodes: Node[]; edges: Edge[] } {
   // Filter out system roles unless showSystemObjects is true
@@ -271,6 +278,84 @@ function buildCanvasLayout(
       return sourceExists && targetExists
     })
 
+  // Create role-to-database edges based on grants
+  // First, aggregate grants by role and database
+  const roleDbGrants = new Map<string, Map<string, { dbPrivileges: Set<string>; schemas: Map<string, Set<string>> }>>()
+
+  for (const grant of grants) {
+    // Only process role grants with database context
+    if (grant.grantee_type !== 'ROLE') continue
+    if (!grant.object_database && grant.object_type === 'WAREHOUSE') continue
+
+    const roleName = grant.grantee_name
+    const dbName = grant.object_database || grant.object_name || 'ACCOUNT'
+
+    if (!roleDbGrants.has(roleName)) {
+      roleDbGrants.set(roleName, new Map())
+    }
+    const roleMap = roleDbGrants.get(roleName)!
+
+    if (!roleMap.has(dbName)) {
+      roleMap.set(dbName, { dbPrivileges: new Set(), schemas: new Map() })
+    }
+    const entry = roleMap.get(dbName)!
+
+    if (grant.object_type === 'DATABASE') {
+      entry.dbPrivileges.add(grant.privilege)
+    } else if (grant.object_schema) {
+      if (!entry.schemas.has(grant.object_schema)) {
+        entry.schemas.set(grant.object_schema, new Set())
+      }
+      entry.schemas.get(grant.object_schema)!.add(grant.privilege)
+    }
+  }
+
+  // Create edges from roles to databases
+  console.log('Building role-to-database edges. Roles with grants:', Array.from(roleDbGrants.keys()))
+  console.log('Available role node IDs:', allRoleNodes.map(n => n.id))
+  console.log('Available database node IDs:', databaseNodes.map(n => n.id))
+  const roleToDatabaseEdges: Edge[] = []
+  for (const [roleName, dbMap] of roleDbGrants) {
+    const roleNodeId = `role-${roleName}`
+    const roleNodeExists = allRoleNodes.some(n => n.id === roleNodeId)
+    if (!roleNodeExists) {
+      console.log(`Role node not found: ${roleNodeId}`)
+      continue
+    }
+
+    for (const [dbName, data] of dbMap) {
+      const dbNodeId = `db-${dbName}`
+      const dbNodeExists = databaseNodes.some(n => n.id === dbNodeId)
+      if (!dbNodeExists) {
+        console.log(`Database node not found: ${dbNodeId}`)
+        continue
+      }
+
+      const schemaCount = data.schemas.size
+      const hasDbGrants = data.dbPrivileges.size > 0
+
+      // Only create edge if there are actual grants
+      if (schemaCount > 0 || hasDbGrants) {
+        console.log(`Creating edge: ${roleNodeId} -> ${dbNodeId} (${schemaCount} schemas, hasDbGrants: ${hasDbGrants})`)
+        roleToDatabaseEdges.push({
+          id: `role-db-edge-${roleName}-${dbName}`,
+          source: roleNodeId,
+          target: dbNodeId,
+          type: 'grantEdge',
+          data: {
+            schemaCount,
+            hasDbGrants,
+            dbPrivileges: Array.from(data.dbPrivileges),
+          },
+          style: { stroke: '#06b6d4', strokeWidth: 2 },
+          animated: true,
+        })
+      }
+    }
+  }
+
+  console.log('Total role-to-database edges created:', roleToDatabaseEdges.length)
+
   // Add button nodes
   const addUserNode: Node = {
     id: 'add-user-button',
@@ -291,7 +376,7 @@ function buildCanvasLayout(
   }
 
   const allNodes = [...userNodes, ...allRoleNodes, ...databaseNodes, addUserNode, addRoleNode]
-  const allEdges = [...assignmentEdges, ...roleToRoleEdges]
+  const allEdges = [...assignmentEdges, ...roleToRoleEdges, ...roleToDatabaseEdges]
 
   return { nodes: allNodes, edges: allEdges }
 }

@@ -20,6 +20,7 @@ import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
 import {
   nodeTypes,
+  edgeTypes,
   AddUserModal,
   AddRoleModal,
   GrantPrivilegesModal,
@@ -89,12 +90,61 @@ export default function CanvasPage() {
   } = usePendingChanges(nodes, setNodes, edges, setEdges)
 
   // Database focus - shows role-to-database connections when clicking a role
-  const { focusedRole, focusOnRole, clearFocus } = useDatabaseFocus(
+  const { focusedRole, focusedRoleGrants, focusOnRole, clearFocus } = useDatabaseFocus(
     baseNodes,
     baseEdges,
     setNodes,
     setEdges
   )
+
+  // Update database nodes with grant highlights when a role is focused
+  useEffect(() => {
+    if (focusedRoleGrants.size > 0) {
+      setNodes(nds => nds.map(node => {
+        if (node.type === 'databaseGroup' || node.type === 'database') {
+          const dbName = node.id.replace('db-', '')
+          const grantDetails = focusedRoleGrants.get(dbName)
+          if (grantDetails) {
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                highlightedDbPrivileges: grantDetails.dbPrivileges,
+                highlightedSchemas: grantDetails.schemas,
+              },
+            }
+          } else {
+            // Clear highlights for databases without grants
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                highlightedDbPrivileges: undefined,
+                highlightedSchemas: undefined,
+              },
+            }
+          }
+        }
+        return node
+      }))
+    } else {
+      // Clear all highlights when no role is focused
+      setNodes(nds => nds.map(node => {
+        if ((node.type === 'databaseGroup' || node.type === 'database') &&
+            (node.data.highlightedDbPrivileges || node.data.highlightedSchemas)) {
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              highlightedDbPrivileges: undefined,
+              highlightedSchemas: undefined,
+            },
+          }
+        }
+        return node
+      }))
+    }
+  }, [focusedRoleGrants, setNodes])
 
   // Database expansion - shows schemas when dragging to a database or clicking
   const {
@@ -215,12 +265,14 @@ export default function CanvasPage() {
   // Handle node clicks
   const onNodeClick = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
+      console.log('Node clicked:', node.id, node.type)
       if (node.id === 'add-user-button') {
         setShowAddUserModal(true)
       } else if (node.id === 'add-role-button') {
         setShowAddRoleModal(true)
       } else if (node.type === 'role' && connectionId) {
         // Show database access for any role when clicked
+        console.log('Role clicked, fetching grants for:', node.data.label)
         const token = await getToken()
         if (token) {
           focusOnRole(node.data.label as string, connectionId, token)
@@ -424,6 +476,7 @@ export default function CanvasPage() {
             onNodeMouseEnter={onNodeMouseEnter}
             onEdgeClick={onEdgeClick}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             fitView
             snapToGrid
             snapGrid={[20, 20]}

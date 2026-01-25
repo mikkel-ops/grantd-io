@@ -622,6 +622,7 @@ async def list_grants(
     db: DbSession,
     grantee_name: str = Query(None, description="Filter by grantee"),
     object_type: str = Query(None, description="Filter by object type"),
+    exclude_system_roles: bool = Query(False, description="Exclude grants to system roles"),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
@@ -635,6 +636,14 @@ async def list_grants(
 
     if object_type:
         query = query.where(PlatformGrant.object_type == object_type)
+
+    if exclude_system_roles:
+        # Exclude common Snowflake system roles
+        system_roles = [
+            'ACCOUNTADMIN', 'SECURITYADMIN', 'USERADMIN', 'SYSADMIN',
+            'ORGADMIN', 'PUBLIC', 'SNOWFLAKE'
+        ]
+        query = query.where(~PlatformGrant.grantee_name.in_(system_roles))
 
     grants = db.execute(query.limit(limit).offset(offset)).scalars().all()
 

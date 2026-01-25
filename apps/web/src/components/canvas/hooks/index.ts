@@ -13,5 +13,6 @@ export { usePendingChanges } from './usePendingChanges'
 export type { PendingChange } from './usePendingChanges'
 
 export { useDatabaseFocus } from './useDatabaseFocus'
+export type { DatabaseGrantDetails } from './useDatabaseFocus'
 
 export { useDatabaseExpansion } from './useDatabaseExpansion'

@@ -12,6 +12,9 @@ export { default as CanvasLegend } from './CanvasLegend'
 // Node components and types
 export * from './nodes'
 
+// Edge components and types
+export * from './edges'
+
 // Hooks
 export * from './hooks'
 

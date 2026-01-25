@@ -3,8 +3,19 @@ import { Node, Edge } from '@xyflow/react'
 import { api } from '@/lib/api'
 import { PlatformGrant } from './useCanvasData'
 
+// Grant details for a database, used for highlighting
+export interface DatabaseGrantDetails {
+  databaseName: string
+  dbPrivileges: string[]
+  schemas: {
+    name: string
+    privileges: string[]
+  }[]
+}
+
 interface UseDatabaseFocusResult {
   focusedRole: string | null
+  focusedRoleGrants: Map<string, DatabaseGrantDetails>
   focusOnRole: (roleName: string, connectionId: string, token: string) => void
   clearFocus: () => void
 }
@@ -16,6 +27,7 @@ export function useDatabaseFocus(
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
 ): UseDatabaseFocusResult {
   const [focusedRole, setFocusedRole] = useState<string | null>(null)
+  const [focusedRoleGrants, setFocusedRoleGrants] = useState<Map<string, DatabaseGrantDetails>>(new Map())
 
   // Use refs to avoid stale closure issues
   const baseNodesRef = useRef<Node[]>(baseNodes)
@@ -31,6 +43,7 @@ export function useDatabaseFocus(
     // Check if toggling off
     if (focusedRole === roleName) {
       setFocusedRole(null)
+      setFocusedRoleGrants(new Map())
       setEdges(baseEdgesRef.current)
       return
     }
@@ -48,11 +61,15 @@ export function useDatabaseFocus(
 
       if (!roleGrants || roleGrants.length === 0) {
         console.log('No grants found for this role')
+        setFocusedRoleGrants(new Map())
         return
       }
 
-      // Aggregate grants by database
-      const dbMap = new Map<string, { schemas: Set<string>; privileges: Set<string> }>()
+      // Aggregate grants by database with detailed schema info
+      const dbMap = new Map<string, {
+        dbPrivileges: Set<string>
+        schemas: Map<string, Set<string>>
+      }>()
 
       for (const grant of roleGrants) {
         // Skip grants without database context
@@ -62,29 +79,58 @@ export function useDatabaseFocus(
 
         const dbName = grant.object_database || grant.object_name || 'ACCOUNT'
         if (!dbMap.has(dbName)) {
-          dbMap.set(dbName, { schemas: new Set(), privileges: new Set() })
+          dbMap.set(dbName, { dbPrivileges: new Set(), schemas: new Map() })
         }
         const entry = dbMap.get(dbName)!
-        if (grant.object_schema) {
-          entry.schemas.add(grant.object_schema)
+
+        // Track database-level vs schema-level privileges
+        if (grant.object_type === 'DATABASE') {
+          entry.dbPrivileges.add(grant.privilege)
+        } else if (grant.object_schema) {
+          if (!entry.schemas.has(grant.object_schema)) {
+            entry.schemas.set(grant.object_schema, new Set())
+          }
+          entry.schemas.get(grant.object_schema)!.add(grant.privilege)
         }
-        entry.privileges.add(grant.privilege)
       }
 
       console.log('Databases with access:', Array.from(dbMap.keys()))
 
+      // Build grant details map for highlighting
+      const grantDetails = new Map<string, DatabaseGrantDetails>()
+      for (const [dbName, data] of dbMap) {
+        grantDetails.set(dbName, {
+          databaseName: dbName,
+          dbPrivileges: Array.from(data.dbPrivileges),
+          schemas: Array.from(data.schemas.entries()).map(([name, privs]) => ({
+            name,
+            privileges: Array.from(privs),
+          })),
+        })
+      }
+      setFocusedRoleGrants(grantDetails)
+
       // Create edges from role to existing database nodes
       const dbEdges: Edge[] = []
-      for (const [dbName] of dbMap) {
+      for (const [dbName, data] of dbMap) {
         // Check if this database node exists in baseNodes
         const dbNodeId = `db-${dbName}`
         const dbNodeExists = baseNodesRef.current.some(n => n.id === dbNodeId)
 
         if (dbNodeExists) {
+          const schemaCount = data.schemas.size
+          const hasDbGrants = data.dbPrivileges.size > 0
+
           dbEdges.push({
             id: `role-db-edge-${roleName}-${dbName}`,
             source: `role-${roleName}`,
             target: dbNodeId,
+            type: 'grantEdge',
+            data: {
+              schemaCount,
+              hasDbGrants,
+              dbPrivileges: Array.from(data.dbPrivileges),
+            },
             style: { stroke: '#06b6d4', strokeWidth: 2 },
             animated: true,
           })
@@ -102,11 +148,13 @@ export function useDatabaseFocus(
 
   const clearFocus = useCallback(() => {
     setFocusedRole(null)
+    setFocusedRoleGrants(new Map())
     setEdges(baseEdgesRef.current)
   }, [setEdges])
 
   return {
     focusedRole,
+    focusedRoleGrants,
     focusOnRole,
     clearFocus,
   }
