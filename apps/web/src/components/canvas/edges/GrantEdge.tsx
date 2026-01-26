@@ -24,7 +24,6 @@ function GrantEdge({
   const edgeData = data as GrantEdgeData | undefined
   const schemaCount = edgeData?.schemaCount ?? 0
   const hasDbGrants = edgeData?.hasDbGrants ?? false
-  const isFaded = edgeData?.isFaded ?? false
 
   // Get opacity from style (set by lineage focus)
   const opacity = (style?.opacity as number) ?? 1

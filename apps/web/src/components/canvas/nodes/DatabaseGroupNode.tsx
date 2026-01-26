@@ -12,6 +12,10 @@ export interface SchemaGrantInfo {
   privileges: string[]
 }
 
+// Available privileges for databases and schemas
+const DB_PRIVILEGES = ['USAGE', 'CREATE SCHEMA', 'MONITOR', 'MODIFY']
+const SCHEMA_PRIVILEGES = ['USAGE', 'CREATE TABLE', 'CREATE VIEW', 'MODIFY', 'MONITOR']
+
 export interface DatabaseGroupNodeData {
   label: string
   schemaCount?: number
@@ -90,10 +94,43 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
         </div>
       </div>
 
-      {/* Expanded schemas section */}
+      {/* Expanded section with DB privileges and schemas */}
       {isExpanded && nodeData.schemas && (
-        <div className="mx-2 mb-1 border-t border-cyan-200">
+        <div
+          className="mx-2 mb-1 border-t border-cyan-200"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Database-level privileges section */}
           <div className="text-[10px] text-cyan-500 uppercase tracking-wide px-2 py-1 font-medium">
+            Database Privileges
+          </div>
+          <div className="flex flex-wrap gap-1 px-2 pb-2">
+            {DB_PRIVILEGES.map((priv) => {
+              const isGranted = nodeData.highlightedDbPrivileges?.includes(priv)
+              return (
+                <div key={priv} className="relative">
+                  <Handle
+                    type="target"
+                    position={Position.Left}
+                    id={`db-priv-${priv}`}
+                    className={`w-2 h-2 !left-[-4px] ${isGranted ? '!bg-green-500' : '!bg-cyan-400'}`}
+                  />
+                  <span
+                    className={`text-[9px] px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
+                      isGranted
+                        ? 'bg-green-100 text-green-700 border-green-300 font-medium'
+                        : 'bg-cyan-50 text-cyan-600 border-cyan-200 hover:border-cyan-400 hover:bg-cyan-100'
+                    }`}
+                  >
+                    {priv}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Schemas section */}
+          <div className="text-[10px] text-cyan-500 uppercase tracking-wide px-2 py-1 font-medium border-t border-cyan-100">
             Schemas
           </div>
           <div className="space-y-1">
@@ -110,12 +147,6 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                       : 'border border-cyan-200 hover:border-cyan-400'
                   }`}
                 >
-                  <Handle
-                    type="target"
-                    position={Position.Left}
-                    id={`schema-${schema.name}`}
-                    className={`w-2.5 h-2.5 !left-[-5px] ${hasSchemaGrants ? '!bg-green-500' : '!bg-cyan-400'}`}
-                  />
                   <div className="flex items-center gap-2">
                     <div className={`rounded-full p-1 ${hasSchemaGrants ? 'bg-green-100' : 'bg-cyan-50'}`}>
                       <Folder className={`h-3 w-3 ${hasSchemaGrants ? 'text-green-600' : 'text-cyan-500'}`} />
@@ -124,19 +155,31 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                       <div className={`text-xs font-medium ${hasSchemaGrants ? 'text-green-700' : 'text-cyan-700'}`}>
                         {schema.name}
                       </div>
-                      {/* Show schema privileges when highlighted */}
-                      {hasSchemaGrants && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {schemaPrivileges.slice(0, 3).map((priv) => (
-                            <span key={priv} className="text-[9px] bg-green-100 text-green-700 px-1 py-0.5 rounded border border-green-300">
-                              {priv}
-                            </span>
-                          ))}
-                          {schemaPrivileges.length > 3 && (
-                            <span className="text-[9px] text-green-600">+{schemaPrivileges.length - 3}</span>
-                          )}
-                        </div>
-                      )}
+                      {/* Show available schema privileges as connection targets */}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {SCHEMA_PRIVILEGES.slice(0, 4).map((priv) => {
+                          const isGranted = schemaPrivileges?.includes(priv)
+                          return (
+                            <div key={priv} className="relative">
+                              <Handle
+                                type="target"
+                                position={Position.Left}
+                                id={`schema-${schema.name}-priv-${priv}`}
+                                className={`w-1.5 h-1.5 !left-[-3px] ${isGranted ? '!bg-green-500' : '!bg-cyan-300'}`}
+                              />
+                              <span
+                                className={`text-[8px] px-1 py-0.5 rounded border ${
+                                  isGranted
+                                    ? 'bg-green-100 text-green-700 border-green-300'
+                                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-cyan-300 hover:bg-cyan-50'
+                                }`}
+                              >
+                                {priv}
+                              </span>
+                            </div>
+                          )
+                        })}
+                      </div>
                     </div>
                     {hasSchemaGrants && (
                       <Key className="h-3 w-3 text-green-500" />

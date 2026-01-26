@@ -23,7 +23,6 @@ import {
   edgeTypes,
   AddUserModal,
   AddRoleModal,
-  GrantPrivilegesModal,
   PendingChangesPanel,
   CanvasLegend,
   useCanvasData,
@@ -32,7 +31,6 @@ import {
   useDatabaseExpansion,
   UserDetails,
   PendingChange,
-  PrivilegeGrant,
 } from '@/components/canvas'
 
 export default function CanvasPage() {
@@ -60,11 +58,6 @@ export default function CanvasPage() {
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   const [showAddRoleModal, setShowAddRoleModal] = useState(false)
   const [addRoleType, setAddRoleType] = useState<'business' | 'functional'>('business')
-  const [showGrantPrivilegesModal, setShowGrantPrivilegesModal] = useState(false)
-  const [pendingPrivilegeGrant, setPendingPrivilegeGrant] = useState<{
-    roleName: string
-    databaseName: string
-  } | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
   // Initialize canvas when data loads
@@ -370,41 +363,45 @@ export default function CanvasPage() {
         return
       }
 
-      // Role to Database connection - open modal for database-level privileges
+      // Role to Database connection - handle privilege-specific or general connections
       // Handle both standalone db nodes and grouped db nodes
       if (params.source?.startsWith('role-') && params.target?.startsWith('db-')) {
         const roleName = params.source.replace('role-', '')
         const databaseName = params.target.replace('db-', '')
 
-        // Check if connection is to a schema handle within the grouped node
-        // targetHandle will be like "schema-{schemaName}" for schema connections
-        if (params.targetHandle?.startsWith('schema-')) {
-          const schemaName = params.targetHandle.replace('schema-', '')
-          setPendingPrivilegeGrant({
-            roleName,
-            databaseName: `${databaseName}.${schemaName}` // Pass full schema path
-          })
-        } else {
-          // Database-level connection
-          setPendingPrivilegeGrant({ roleName, databaseName })
+        // Check if connection is to a specific database privilege
+        // targetHandle will be like "db-priv-{privilege}" for direct privilege grants
+        if (params.targetHandle?.startsWith('db-priv-')) {
+          const privilege = params.targetHandle.replace('db-priv-', '')
+          // Directly grant this privilege without opening modal
+          addGrantPrivilege(roleName, databaseName, [{
+            privilege,
+            objectType: 'DATABASE',
+            objectName: databaseName,
+          }])
+          return
         }
-        setShowGrantPrivilegesModal(true)
-        return
-      }
 
-      // Role to standalone Schema node connection (legacy support)
-      if (params.source?.startsWith('role-') && params.target?.startsWith('schema-')) {
-        const roleName = params.source.replace('role-', '')
-        // schema id format: schema-{dbName}-{schemaName}
-        const parts = params.target.replace('schema-', '').split('-')
-        const databaseName = parts[0]
-        const schemaName = parts.slice(1).join('-') // Handle schema names with dashes
+        // Check if connection is to a schema-level privilege
+        // targetHandle will be like "schema-{schemaName}-priv-{privilege}"
+        if (params.targetHandle?.includes('-priv-')) {
+          const parts = params.targetHandle.split('-priv-')
+          const schemaName = parts[0]?.replace('schema-', '')
+          const privilege = parts[1]
+          // Directly grant this privilege to the schema if we have valid parts
+          if (schemaName && privilege) {
+            addGrantPrivilege(roleName, `${databaseName}.${schemaName}`, [{
+              privilege,
+              objectType: 'SCHEMA',
+              objectName: `${databaseName}.${schemaName}`,
+            }])
+          }
+          return
+        }
 
-        setPendingPrivilegeGrant({
-          roleName,
-          databaseName: `${databaseName}.${schemaName}` // Pass full schema path
-        })
-        setShowGrantPrivilegesModal(true)
+        // For general database connections (not to specific privileges),
+        // expand the database so user can click on specific privileges
+        // The database should already be expanded when dragging starts
         return
       }
     },
@@ -503,22 +500,6 @@ export default function CanvasPage() {
       setShowAddRoleModal(false)
     },
     [addCreateRole]
-  )
-
-  // Handle privilege grants from modal
-  const handlePrivilegesSelected = useCallback(
-    (grants: PrivilegeGrant[]) => {
-      if (pendingPrivilegeGrant && grants.length > 0) {
-        addGrantPrivilege(
-          pendingPrivilegeGrant.roleName,
-          pendingPrivilegeGrant.databaseName,
-          grants
-        )
-      }
-      setShowGrantPrivilegesModal(false)
-      setPendingPrivilegeGrant(null)
-    },
-    [pendingPrivilegeGrant, addGrantPrivilege]
   )
 
   // Submit changeset
@@ -682,18 +663,6 @@ export default function CanvasPage() {
         />
       )}
 
-      {showGrantPrivilegesModal && connectionId && pendingPrivilegeGrant && (
-        <GrantPrivilegesModal
-          connectionId={connectionId}
-          roleName={pendingPrivilegeGrant.roleName}
-          databaseName={pendingPrivilegeGrant.databaseName}
-          onClose={() => {
-            setShowGrantPrivilegesModal(false)
-            setPendingPrivilegeGrant(null)
-          }}
-          onGrantsSelected={handlePrivilegesSelected}
-        />
-      )}
     </div>
   )
 }

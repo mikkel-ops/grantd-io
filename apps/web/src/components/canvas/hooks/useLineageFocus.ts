@@ -16,7 +16,7 @@ interface UseLineageFocusResult {
  */
 function computeLineage(
   nodeId: string,
-  nodes: Node[],
+  _nodes: Node[],
   edges: Edge[]
 ): { nodeIds: Set<string>; edgeIds: Set<string> } {
   const nodeIds = new Set<string>([nodeId])

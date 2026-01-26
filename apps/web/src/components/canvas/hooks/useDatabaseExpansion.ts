@@ -77,15 +77,24 @@ export function useDatabaseExpansion(
         const dbNode = nds.find(n => n.id === dbNodeId)
         if (!dbNode) return nds
 
-        // Use the original position if we have it, otherwise use current position
-        const expandedDbY = originalYPositions.current.get(dbNodeId) ?? dbNode.position.y
+        // Get all database nodes and sort by Y position
+        const dbNodes = nds.filter(n => n.id.startsWith('db-'))
+        const sortedDbNodes = [...dbNodes].sort((a, b) => a.position.y - b.position.y)
+
+        // Find the index of our target database
+        const targetIndex = sortedDbNodes.findIndex(n => n.id === dbNodeId)
+        const expandedDbY = dbNode.position.y
 
         // Save original positions for ALL database nodes if not already saved
-        for (const n of nds) {
-          if ((n.type === 'database' || n.type === 'databaseGroup') && !originalYPositions.current.has(n.id)) {
+        // This preserves the initial layout positions
+        for (const n of sortedDbNodes) {
+          if (!originalYPositions.current.has(n.id)) {
             originalYPositions.current.set(n.id, n.position.y)
           }
         }
+
+        console.log('Expanding database:', databaseName, 'at Y:', expandedDbY, 'expansion height:', expansionHeight)
+        console.log('Target index:', targetIndex, 'of', sortedDbNodes.length, 'databases')
 
         const updatedNodes = nds
           .filter(n => !n.id.startsWith('schema-')) // Remove any standalone schema nodes
@@ -117,9 +126,12 @@ export function useDatabaseExpansion(
             }
 
             // Push down database nodes that are below the expanded database
-            if ((n.type === 'database' || n.type === 'databaseGroup') && n.id !== dbNodeId) {
-              const originalY = originalYPositions.current.get(n.id) ?? n.position.y
-              if (originalY > expandedDbY) {
+            if (n.id.startsWith('db-') && n.id !== dbNodeId) {
+              // Check if this database is below the expanded one in the sorted order
+              const nodeIndex = sortedDbNodes.findIndex(sn => sn.id === n.id)
+              if (nodeIndex > targetIndex) {
+                const originalY = originalYPositions.current.get(n.id) ?? n.position.y
+                console.log('Pushing down:', n.id, 'from', n.position.y, 'to', originalY + expansionHeight)
                 return {
                   ...n,
                   position: {
@@ -163,7 +175,8 @@ export function useDatabaseExpansion(
           }
 
           // Restore original positions for database nodes
-          if (n.type === 'database' || n.type === 'databaseGroup') {
+          // Check both by type AND by id prefix to catch all database nodes
+          if (n.type === 'database' || n.type === 'databaseGroup' || n.id.startsWith('db-')) {
             const originalY = originalYPositions.current.get(n.id)
             if (originalY !== undefined) {
               return {
