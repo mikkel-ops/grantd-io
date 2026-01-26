@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef } from 'react'
+import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
 import {
   ReactFlow,
   Node,
@@ -32,10 +32,12 @@ import {
   UserDetails,
   PendingChange,
 } from '@/components/canvas'
+import { useToast } from '@/hooks/use-toast'
 
 export default function CanvasPage() {
   const { getToken } = useAuth()
   const navigate = useNavigate()
+  const { toast } = useToast()
 
   // Filter state
   const [showSystemObjects, setShowSystemObjects] = useState(false)
@@ -104,8 +106,8 @@ export default function CanvasPage() {
     togglePrivilege(focusedRole, databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
   }, [focusedRole, togglePrivilege])
 
-  // Build pending privilege changes map for database nodes
-  const pendingPrivilegesByDb = useCallback(() => {
+  // Build pending privilege changes map for database nodes (memoized value, not function)
+  const pendingPrivilegesByDb = useMemo(() => {
     const map = new Map<string, { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke' }[]>()
     for (const change of pendingChanges) {
       if ((change.type === 'grant_privilege' || change.type === 'revoke_privilege') && change.databaseName) {
@@ -128,14 +130,12 @@ export default function CanvasPage() {
 
   // Update database nodes with grant highlights when a role is focused
   useEffect(() => {
-    const pendingByDb = pendingPrivilegesByDb()
-
     if (focusedRoleGrants.size > 0 || focusedRole) {
       setNodes(nds => nds.map(node => {
         if (node.type === 'databaseGroup' || node.type === 'database') {
           const dbName = node.id.replace('db-', '')
           const grantDetails = focusedRoleGrants.get(dbName)
-          const pendingChangesForDb = pendingByDb.get(dbName)
+          const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
 
           return {
             ...node,
@@ -152,9 +152,11 @@ export default function CanvasPage() {
         return node
       }))
     } else {
-      // Clear all highlights and callbacks when no role is focused
+      // Clear highlights and callbacks when no role is focused, but keep pending changes visible
       setNodes(nds => nds.map(node => {
         if (node.type === 'databaseGroup' || node.type === 'database') {
+          const dbName = node.id.replace('db-', '')
+          const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
           return {
             ...node,
             data: {
@@ -162,7 +164,8 @@ export default function CanvasPage() {
               highlightedDbPrivileges: undefined,
               highlightedSchemas: undefined,
               focusedRole: undefined,
-              pendingPrivilegeChanges: undefined,
+              // Keep pending changes visible even when unfocused
+              pendingPrivilegeChanges: pendingChangesForDb,
               onPrivilegeToggle: undefined,
             },
           }
@@ -639,13 +642,22 @@ export default function CanvasPage() {
       )
 
       clearAllChanges()
+      toast({
+        title: 'Changeset created',
+        description: 'Your changes have been saved and are ready for review.',
+      })
       navigate('/changesets')
     } catch (error) {
       console.error('Failed to create changeset:', error)
+      toast({
+        title: 'Error',
+        description: 'Failed to create changeset. Please try again.',
+        variant: 'destructive',
+      })
     } finally {
       setSubmitting(false)
     }
-  }, [connectionId, pendingChanges, getToken, navigate, clearAllChanges])
+  }, [connectionId, pendingChanges, getToken, navigate, clearAllChanges, toast])
 
   if (loading) {
     return (

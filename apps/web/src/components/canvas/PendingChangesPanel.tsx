@@ -1,4 +1,4 @@
-import { User, Shield, Plus, Minus, Trash2, FileText, ArrowRight, Loader2, Database, Key } from 'lucide-react'
+import { User, Shield, Plus, Minus, Trash2, FileText, ArrowRight, Loader2, Database } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { PendingChange } from './hooks'
@@ -19,8 +19,8 @@ export default function PendingChangesPanel({
   submitting,
 }: PendingChangesPanelProps) {
   return (
-    <Card className="w-80 flex-shrink-0">
-      <CardHeader className="pb-3">
+    <Card className="w-80 flex-shrink-0 flex flex-col max-h-full overflow-hidden">
+      <CardHeader className="pb-3 flex-shrink-0">
         <CardTitle className="text-lg flex items-center gap-2">
           <FileText className="h-5 w-5" />
           Pending Changes
@@ -31,7 +31,7 @@ export default function PendingChangesPanel({
           )}
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="flex-1 overflow-hidden flex flex-col">
         {changes.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <FileText className="h-8 w-8 mx-auto mb-2 opacity-50" />
@@ -40,15 +40,17 @@ export default function PendingChangesPanel({
           </div>
         ) : (
           <>
-            {changes.map((change) => (
-              <PendingChangeItem
-                key={change.id}
-                change={change}
-                onRemove={() => onRemoveChange(change.id, change.type)}
-              />
-            ))}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+              {changes.map((change) => (
+                <PendingChangeItem
+                  key={change.id}
+                  change={change}
+                  onRemove={() => onRemoveChange(change.id, change.type)}
+                />
+              ))}
+            </div>
 
-            <div className="pt-3 border-t space-y-2">
+            <div className="pt-3 border-t space-y-2 flex-shrink-0 mt-3">
               <Button onClick={onSubmit} disabled={submitting} className="w-full">
                 {submitting ? (
                   <>

@@ -220,51 +220,53 @@ export function usePendingChanges(
     const objectName = objectType === 'SCHEMA' && schemaName ? `${databaseName}.${schemaName}` : databaseName
     const changeId = `toggle-${roleName}-${objectName}-${privilege}`
 
-    // Check if there's already a pending change for this privilege
-    const existingChange = pendingChanges.find(c => c.id === changeId)
+    // Use functional update to avoid stale closure issues
+    setPendingChanges(prev => {
+      // Check if there's already a pending change for this privilege
+      const existingChange = prev.find(c => c.id === changeId)
 
-    if (existingChange) {
-      // Toggle off - remove the pending change
-      setPendingChanges(prev => prev.filter(c => c.id !== changeId))
-      return
-    }
+      if (existingChange) {
+        // Toggle off - remove the pending change
+        return prev.filter(c => c.id !== changeId)
+      }
 
-    // Add new pending change
-    if (isCurrentlyGranted) {
-      // Currently granted, so this is a revoke
-      setPendingChanges(prev => [
-        ...prev,
-        {
-          id: changeId,
-          type: 'revoke_privilege',
-          roleName,
-          databaseName,
-          schemaName,
-          privilege,
-          objectType,
-        },
-      ])
-    } else {
-      // Not currently granted, so this is a grant
-      setPendingChanges(prev => [
-        ...prev,
-        {
-          id: changeId,
-          type: 'grant_privilege',
-          roleName,
-          databaseName,
-          schemaName,
-          privilege,
-          objectType,
-          privilegeGrants: [{
+      // Add new pending change
+      if (isCurrentlyGranted) {
+        // Currently granted, so this is a revoke
+        return [
+          ...prev,
+          {
+            id: changeId,
+            type: 'revoke_privilege' as const,
+            roleName,
+            databaseName,
+            schemaName,
             privilege,
             objectType,
-            objectName,
-          }],
-        },
-      ])
-    }
-  }, [pendingChanges])
+          },
+        ]
+      } else {
+        // Not currently granted, so this is a grant
+        return [
+          ...prev,
+          {
+            id: changeId,
+            type: 'grant_privilege' as const,
+            roleName,
+            databaseName,
+            schemaName,
+            privilege,
+            objectType,
+            privilegeGrants: [{
+              privilege,
+              objectType,
+              objectName,
+            }],
+          },
+        ]
+      }
+    })
+  }, []) // No dependencies needed - uses functional update
 
   const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
