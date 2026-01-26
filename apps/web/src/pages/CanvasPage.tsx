@@ -432,9 +432,8 @@ export default function CanvasPage() {
           focusOnRole(node.data.label as string, connectionId, token)
         }
       } else if ((node.type === 'database' || node.type === 'databaseGroup') && connectionId) {
-        // Focus on database to show lineage
-        setFocusedNode(node.id)
-        // Toggle database expansion when clicked
+        // Don't set focus on database - it's a leaf node with no meaningful lineage
+        // Just toggle database expansion when clicked
         const databaseName = node.id.replace('db-', '')
         const token = await getToken()
         if (token) {

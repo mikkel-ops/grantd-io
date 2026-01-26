@@ -2,9 +2,10 @@ import { useState, useCallback, useRef } from 'react'
 import { Node } from '@xyflow/react'
 import { api } from '@/lib/api'
 
-const SCHEMA_ROW_HEIGHT = 40
-const SCHEMAS_HEADER_HEIGHT = 24
-const SCHEMAS_PADDING = 12
+const SCHEMA_ROW_HEIGHT = 92  // Each schema card height
+const SCHEMAS_HEADER_HEIGHT = 30
+const SCHEMAS_PADDING = 24
+const DB_PRIVILEGES_SECTION_HEIGHT = 98  // "Database Privileges" header + privilege chips row + padding
 
 interface SchemaInfo {
   name: string
@@ -66,9 +67,9 @@ export function useDatabaseExpansion(
 
       const dbNodeId = `db-${databaseName}`
 
-      // Calculate the height increase needed for schemas
+      // Calculate the height increase needed for schemas and DB privileges section
       const expansionHeight = schemas.length > 0
-        ? (schemas.length * SCHEMA_ROW_HEIGHT) + SCHEMAS_HEADER_HEIGHT + SCHEMAS_PADDING
+        ? DB_PRIVILEGES_SECTION_HEIGHT + (schemas.length * SCHEMA_ROW_HEIGHT) + SCHEMAS_HEADER_HEIGHT + SCHEMAS_PADDING
         : 0
 
       // Update nodes: modify the database node to include schemas and push down others
