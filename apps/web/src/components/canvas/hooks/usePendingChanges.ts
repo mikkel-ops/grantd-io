@@ -19,7 +19,7 @@ interface UsePendingChangesResult {
   addGrantRole: (userName: string, roleName: string) => void
   addRevokeRole: (userName: string, roleName: string, edgeId: string) => void
   addCreateUser: (details: UserDetails) => void
-  addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[]) => void
+  addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType?: 'business' | 'functional') => void
   addGrantPrivilege: (roleName: string, databaseName: string, grants: PrivilegeGrant[]) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
@@ -114,25 +114,31 @@ export function usePendingChanges(
     ])
   }, [nodes, setNodes])
 
-  const addCreateRole = useCallback((roleName: string, inheritedRoles: string[], assignedUsers: string[]) => {
-    const businessRoleCount = nodes.filter(n => n.type === 'role' && n.position.x === LAYOUT.BUSINESS_ROLE_X).length
+  const addCreateRole = useCallback((roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType: 'business' | 'functional' = 'business') => {
+    const isFunctional = roleType === 'functional'
+    const xPosition = isFunctional ? LAYOUT.FUNCTIONAL_ROLE_X : LAYOUT.BUSINESS_ROLE_X
+    const buttonId = isFunctional ? 'add-functional-role-button' : 'add-business-role-button'
+    const buttonLabel = isFunctional ? 'Add Functional Role' : 'Add Business Role'
+    const buttonType = isFunctional ? 'functional-role' : 'role'
+
+    const roleCount = nodes.filter(n => n.type === 'role' && n.position.x === xPosition).length
     const newRoleNode: Node = {
       id: `role-${roleName}`,
       type: 'role',
-      position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.START_Y + businessRoleCount * LAYOUT.ROW_HEIGHT },
-      data: { label: roleName, type: 'business', isSystem: false, isNew: true },
+      position: { x: xPosition, y: LAYOUT.START_Y + roleCount * LAYOUT.ROW_HEIGHT },
+      data: { label: roleName, type: roleType, isSystem: false, isNew: true },
     }
 
     setNodes(nds => {
-      const filtered = nds.filter(n => n.id !== 'add-role-button')
+      const filtered = nds.filter(n => n.id !== buttonId)
       return [
         ...filtered,
         newRoleNode,
         {
-          id: 'add-role-button',
+          id: buttonId,
           type: 'addButton',
-          position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.START_Y + (businessRoleCount + 1) * LAYOUT.ROW_HEIGHT },
-          data: { label: 'Add Business Role', type: 'role', onClick: () => {} },
+          position: { x: xPosition, y: LAYOUT.START_Y + (roleCount + 1) * LAYOUT.ROW_HEIGHT },
+          data: { label: buttonLabel, type: buttonType, onClick: () => {} },
           selectable: false,
           draggable: false,
         },
@@ -230,11 +236,18 @@ export function usePendingChanges(
       setEdges(eds => eds.filter(e => e.source !== `user-${changeId}`))
     } else if (changeType === 'create_role') {
       setNodes(nds => {
+        const roleNode = nds.find(n => n.id === `role-${changeId}`)
         const filtered = nds.filter(n => n.id !== `role-${changeId}`)
-        const businessRoleCount = filtered.filter(n => n.type === 'role' && n.position.x === LAYOUT.BUSINESS_ROLE_X).length
+
+        // Determine if it was a functional or business role based on x position
+        const isFunctional = roleNode && roleNode.position.x === LAYOUT.FUNCTIONAL_ROLE_X
+        const xPosition = isFunctional ? LAYOUT.FUNCTIONAL_ROLE_X : LAYOUT.BUSINESS_ROLE_X
+        const buttonId = isFunctional ? 'add-functional-role-button' : 'add-business-role-button'
+
+        const roleCount = filtered.filter(n => n.type === 'role' && n.position.x === xPosition).length
         return filtered.map(n => {
-          if (n.id === 'add-role-button') {
-            return { ...n, position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.START_Y + businessRoleCount * LAYOUT.ROW_HEIGHT } }
+          if (n.id === buttonId) {
+            return { ...n, position: { x: xPosition, y: LAYOUT.START_Y + roleCount * LAYOUT.ROW_HEIGHT } }
           }
           return n
         })

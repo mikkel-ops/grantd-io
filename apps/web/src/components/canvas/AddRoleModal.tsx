@@ -4,21 +4,26 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
+export type RoleModalType = 'business' | 'functional'
+
 interface AddRoleModalProps {
   connectionId: string
+  roleType?: RoleModalType
   onClose: () => void
-  onRoleCreated: (roleName: string, inheritedRoles: string[], assignedUsers: string[]) => void
+  onRoleCreated: (roleName: string, roleType: RoleModalType, inheritedRoles: string[], assignedUsers: string[]) => void
 }
 
-export default function AddRoleModal({ onClose, onRoleCreated }: AddRoleModalProps) {
+export default function AddRoleModal({ onClose, onRoleCreated, roleType = 'business' }: AddRoleModalProps) {
   const [roleName, setRoleName] = useState('')
   const [creating, setCreating] = useState(false)
+
+  const isFunctional = roleType === 'functional'
 
   const handleCreate = () => {
     if (!roleName) return
     setCreating(true)
     // Just add to canvas - no API call, role inheritance done via canvas connections
-    onRoleCreated(roleName, [], [])
+    onRoleCreated(roleName, roleType, [], [])
     setCreating(false)
   }
 
@@ -29,8 +34,8 @@ export default function AddRoleModal({ onClose, onRoleCreated }: AddRoleModalPro
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b">
           <div className="flex items-center gap-2">
-            <Shield className="h-5 w-5" />
-            <h2 className="text-lg font-semibold">Add Business Role</h2>
+            <Shield className={`h-5 w-5 ${isFunctional ? 'text-purple-600' : 'text-green-600'}`} />
+            <h2 className="text-lg font-semibold">Add {isFunctional ? 'Functional' : 'Business'} Role</h2>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-muted">
             <X className="h-5 w-5" />
@@ -43,13 +48,16 @@ export default function AddRoleModal({ onClose, onRoleCreated }: AddRoleModalPro
             <Label htmlFor="modal-roleName">Role Name *</Label>
             <Input
               id="modal-roleName"
-              placeholder="e.g., DATA_ANALYST_ROLE"
+              placeholder={isFunctional ? "e.g., READ_SALES_DATA or WRITE_INVENTORY" : "e.g., DATA_ANALYST or MARKETING_TEAM"}
               value={roleName}
               onChange={(e) => setRoleName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, ''))}
               autoFocus
             />
             <p className="text-xs text-muted-foreground">
-              Use uppercase letters, numbers, and underscores only
+              {isFunctional
+                ? "Use action-based names describing what the role can do (READ_, WRITE_, CREATE_, etc.)"
+                : "Use team or job-title based names for who gets this role"
+              }
             </p>
           </div>
 

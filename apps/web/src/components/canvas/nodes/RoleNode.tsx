@@ -9,6 +9,7 @@ export interface RoleNodeData {
   type?: RoleType
   isSystem?: boolean
   isNew?: boolean
+  isFaded?: boolean
 }
 
 const ROLE_STYLES = {
@@ -41,17 +42,17 @@ function RoleNode({ data }: NodeProps) {
     : ROLE_STYLES.default
 
   return (
-    <div className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 ${styles.border} min-w-[150px] ${
+    <div className={`px-4 py-3 shadow-md rounded-lg bg-white border-2 ${styles.border} w-[250px] cursor-pointer transition-opacity duration-200 ${
       nodeData.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4 animate-pulse' : ''
-    }`}>
+    } ${nodeData.isFaded ? 'opacity-20' : ''}`}>
       <Handle type="target" position={Position.Left} className="w-3 h-3 !bg-gray-500" />
       <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-gray-500" />
       <div className="flex items-center gap-2">
-        <div className={`rounded-full ${styles.bg} p-1.5`}>
+        <div className={`rounded-full ${styles.bg} p-1.5 flex-shrink-0`}>
           <Shield className={`h-4 w-4 ${styles.icon}`} />
         </div>
-        <div>
-          <div className="text-sm font-medium">{nodeData.label}</div>
+        <div className="min-w-0 flex-1">
+          <div className="text-sm font-medium truncate" title={nodeData.label}>{nodeData.label}</div>
           {nodeData.type && (
             <div className="text-xs text-gray-500 capitalize">{nodeData.type}</div>
           )}

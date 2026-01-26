@@ -139,8 +139,10 @@ export function useDatabaseFocus(
 
       console.log('Created edges:', dbEdges.length)
 
-      // Update edges to show connections
-      setEdges([...baseEdgesRef.current, ...dbEdges])
+      // Update edges: filter out all other role-db edges, keep only base edges and the focused role's edges
+      // This ensures only the focused role's database connections are visible
+      const filteredBaseEdges = baseEdgesRef.current.filter(e => !e.id.startsWith('role-db-edge-'))
+      setEdges([...filteredBaseEdges, ...dbEdges])
     } catch (error) {
       console.error('Failed to fetch role grants:', error)
     }

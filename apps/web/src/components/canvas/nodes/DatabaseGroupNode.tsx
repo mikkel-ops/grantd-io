@@ -21,6 +21,7 @@ export interface DatabaseGroupNodeData {
   // Grant highlighting when a role is focused
   highlightedDbPrivileges?: string[]
   highlightedSchemas?: SchemaGrantInfo[]
+  isFaded?: boolean
 }
 
 function DatabaseGroupNode({ data, id }: NodeProps) {
@@ -39,9 +40,9 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
 
   return (
     <div
-      className={`shadow-md rounded-lg bg-gradient-to-b from-cyan-50 to-white min-w-[200px] cursor-pointer ${
+      className={`shadow-md rounded-lg bg-gradient-to-b from-cyan-50 to-white w-[250px] cursor-pointer transition-opacity duration-200 ${
         isExpanded ? 'pb-2' : ''
-      } ${hasHighlights ? 'border-2 border-green-400 ring-2 ring-green-200' : 'border-2 border-cyan-400'}`}
+      } ${hasHighlights ? 'border-2 border-green-400 ring-2 ring-green-200' : 'border-2 border-cyan-400'} ${nodeData.isFaded ? 'opacity-20' : ''}`}
     >
       {/* Main database header - always visible */}
       <div className="px-4 py-3">
@@ -52,11 +53,11 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
           className={`w-3 h-3 ${hasHighlights ? '!bg-green-500' : '!bg-cyan-500'}`}
         />
         <div className="flex items-center gap-2">
-          <div className={`rounded-full p-1.5 ${hasHighlights ? 'bg-green-100' : 'bg-cyan-100'}`}>
+          <div className={`rounded-full p-1.5 flex-shrink-0 ${hasHighlights ? 'bg-green-100' : 'bg-cyan-100'}`}>
             <Database className={`h-4 w-4 ${hasHighlights ? 'text-green-600' : 'text-cyan-600'}`} />
           </div>
-          <div className="flex-1">
-            <div className="text-sm font-medium">{nodeData.label}</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-medium truncate" title={nodeData.label}>{nodeData.label}</div>
             {!isExpanded && nodeData.schemaCount !== undefined && nodeData.schemaCount > 0 && (
               <span className="text-xs text-cyan-600">
                 {nodeData.schemaCount} schema{nodeData.schemaCount !== 1 ? 's' : ''}

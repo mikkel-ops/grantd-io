@@ -59,6 +59,7 @@ export default function CanvasPage() {
   // Modal state
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   const [showAddRoleModal, setShowAddRoleModal] = useState(false)
+  const [addRoleType, setAddRoleType] = useState<'business' | 'functional'>('business')
   const [showGrantPrivilegesModal, setShowGrantPrivilegesModal] = useState(false)
   const [pendingPrivilegeGrant, setPendingPrivilegeGrant] = useState<{
     roleName: string
@@ -153,6 +154,154 @@ export default function CanvasPage() {
     expandDatabase,
     collapseDatabase,
   } = useDatabaseExpansion(baseNodes, setNodes)
+
+  // Lineage focus state - track which node is focused
+  const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
+
+  // Toggle focus on/off when clicking the same node
+  const setFocusedNode = useCallback((nodeId: string | null) => {
+    setFocusedNodeId(prev => prev === nodeId ? null : nodeId)
+  }, [])
+
+  // Apply lineage fading when focusedNodeId changes
+  // We compute lineage inline using current edges to include dynamic role-db edges
+  useEffect(() => {
+    if (!focusedNodeId) {
+      // Clear all fading when no node is focused
+      setNodes(nds => nds.map(node => ({
+        ...node,
+        data: {
+          ...node.data,
+          isFaded: false,
+        },
+      })))
+
+      // Reset edge opacity
+      setEdges(eds => eds.map(edge => ({
+        ...edge,
+        style: {
+          ...edge.style,
+          opacity: 1,
+        },
+      })))
+
+      // Collapse any expanded database when focus is cleared
+      if (expandedDatabase) {
+        collapseDatabase()
+      }
+      return
+    }
+
+    // Compute lineage using current edges state (includes dynamic edges)
+    // We need to track which databases to expand after computing lineage
+    let databasesToExpand: string[] = []
+
+    // Use functional update to access current edges
+    setEdges(currentEdges => {
+      // Build adjacency maps
+      const outgoing = new Map<string, string[]>()
+      const incoming = new Map<string, string[]>()
+      const edgeMap = new Map<string, { source: string; target: string }>()
+
+      for (const edge of currentEdges) {
+        if (edge.source.includes('add-') || edge.target.includes('add-')) continue
+        edgeMap.set(edge.id, { source: edge.source, target: edge.target })
+
+        if (!outgoing.has(edge.source)) outgoing.set(edge.source, [])
+        outgoing.get(edge.source)!.push(edge.target)
+
+        if (!incoming.has(edge.target)) incoming.set(edge.target, [])
+        incoming.get(edge.target)!.push(edge.source)
+      }
+
+      // Directional traversal: only follow edges in the correct direction
+      // Upstream = sources (users/roles that grant to this node)
+      // Downstream = targets (roles/databases this node grants to)
+      const connectedNodes = new Set<string>([focusedNodeId])
+      const connectedEdges = new Set<string>()
+      const connectedDatabases: string[] = []
+
+      // Traverse UPSTREAM (incoming edges) - find users/roles that connect TO this node
+      const upstreamQueue = [focusedNodeId]
+      const upstreamVisited = new Set<string>([focusedNodeId])
+      while (upstreamQueue.length > 0) {
+        const current = upstreamQueue.shift()!
+        for (const source of incoming.get(current) || []) {
+          if (!upstreamVisited.has(source)) {
+            upstreamVisited.add(source)
+            connectedNodes.add(source)
+            // Only continue upstream traversal for user->role edges, not role->role
+            // This prevents going back through the whole graph
+            if (source.startsWith('user-')) {
+              upstreamQueue.push(source)
+            }
+          }
+        }
+      }
+
+      // Traverse DOWNSTREAM (outgoing edges) - find roles/databases this node connects TO
+      const downstreamQueue = [focusedNodeId]
+      const downstreamVisited = new Set<string>([focusedNodeId])
+      while (downstreamQueue.length > 0) {
+        const current = downstreamQueue.shift()!
+        for (const target of outgoing.get(current) || []) {
+          if (!downstreamVisited.has(target)) {
+            downstreamVisited.add(target)
+            connectedNodes.add(target)
+            // Track connected databases for expansion
+            if (target.startsWith('db-')) {
+              connectedDatabases.push(target.replace('db-', ''))
+            }
+            // Continue downstream traversal for role->role and role->db edges
+            // But don't go back upstream from databases
+            if (!target.startsWith('db-')) {
+              downstreamQueue.push(target)
+            }
+          }
+        }
+      }
+
+      // Find edges that connect nodes in the lineage
+      for (const [edgeId, { source, target }] of edgeMap) {
+        if (connectedNodes.has(source) && connectedNodes.has(target)) {
+          connectedEdges.add(edgeId)
+        }
+      }
+
+      // Update nodes with fading
+      setNodes(nds => nds.map(node => ({
+        ...node,
+        data: {
+          ...node.data,
+          isFaded: !connectedNodes.has(node.id),
+        },
+      })))
+
+      // Store databases to expand (will be done after state updates complete)
+      databasesToExpand = connectedDatabases
+
+      // Return edges with faded styling (use 0 to completely hide non-lineage edges)
+      return currentEdges.map(edge => ({
+        ...edge,
+        style: {
+          ...edge.style,
+          opacity: connectedEdges.has(edge.id) ? 1 : 0,
+        },
+      }))
+    })
+
+    // Expand the first connected database after a short delay to let state updates settle
+    if (connectionId) {
+      setTimeout(async () => {
+        if (databasesToExpand.length > 0) {
+          const token = await getToken()
+          if (token && databasesToExpand[0]) {
+            expandDatabase(databasesToExpand[0], connectionId, token)
+          }
+        }
+      }, 50)
+    }
+  }, [focusedNodeId, focusedRole, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase])
 
   // Track connection drag state
   const connectingFromRole = useRef<string | null>(null)
@@ -268,16 +417,26 @@ export default function CanvasPage() {
       console.log('Node clicked:', node.id, node.type)
       if (node.id === 'add-user-button') {
         setShowAddUserModal(true)
-      } else if (node.id === 'add-role-button') {
+      } else if (node.id === 'add-business-role-button') {
+        setAddRoleType('business')
         setShowAddRoleModal(true)
+      } else if (node.id === 'add-functional-role-button') {
+        setAddRoleType('functional')
+        setShowAddRoleModal(true)
+      } else if (node.type === 'user') {
+        // Focus on user to show lineage
+        setFocusedNode(node.id)
       } else if (node.type === 'role' && connectionId) {
-        // Show database access for any role when clicked
+        // Focus on role to show lineage and database access
+        setFocusedNode(node.id)
         console.log('Role clicked, fetching grants for:', node.data.label)
         const token = await getToken()
         if (token) {
           focusOnRole(node.data.label as string, connectionId, token)
         }
       } else if ((node.type === 'database' || node.type === 'databaseGroup') && connectionId) {
+        // Focus on database to show lineage
+        setFocusedNode(node.id)
         // Toggle database expansion when clicked
         const databaseName = node.id.replace('db-', '')
         const token = await getToken()
@@ -286,8 +445,18 @@ export default function CanvasPage() {
         }
       }
     },
-    [focusOnRole, toggleDatabase, connectionId, getToken]
+    [focusOnRole, toggleDatabase, connectionId, getToken, setFocusedNode]
   )
+
+  // Handle pane click (empty canvas space) - clear focus
+  const onPaneClick = useCallback(() => {
+    if (focusedRole) {
+      clearFocus()
+    }
+    if (focusedNodeId) {
+      setFocusedNode(null)
+    }
+  }, [focusedRole, clearFocus, focusedNodeId, setFocusedNode])
 
   // Handle edge clicks (for revokes)
   const onEdgeClick = useCallback(
@@ -329,8 +498,8 @@ export default function CanvasPage() {
 
   // Handle role creation
   const handleRoleCreated = useCallback(
-    (roleName: string, inheritedRoles: string[], assignedUsers: string[]) => {
-      addCreateRole(roleName, inheritedRoles, assignedUsers)
+    (roleName: string, roleType: 'business' | 'functional', inheritedRoles: string[], assignedUsers: string[]) => {
+      addCreateRole(roleName, inheritedRoles, assignedUsers, roleType)
       setShowAddRoleModal(false)
     },
     [addCreateRole]
@@ -475,6 +644,7 @@ export default function CanvasPage() {
             onNodeClick={onNodeClick}
             onNodeMouseEnter={onNodeMouseEnter}
             onEdgeClick={onEdgeClick}
+            onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             fitView
@@ -506,6 +676,7 @@ export default function CanvasPage() {
       {showAddRoleModal && connectionId && (
         <AddRoleModal
           connectionId={connectionId}
+          roleType={addRoleType}
           onClose={() => setShowAddRoleModal(false)}
           onRoleCreated={handleRoleCreated}
         />

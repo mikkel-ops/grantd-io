@@ -6,6 +6,7 @@ export interface GrantEdgeData {
   schemaCount: number
   hasDbGrants: boolean
   dbPrivileges: string[]
+  isFaded?: boolean
 }
 
 function GrantEdge({
@@ -23,6 +24,10 @@ function GrantEdge({
   const edgeData = data as GrantEdgeData | undefined
   const schemaCount = edgeData?.schemaCount ?? 0
   const hasDbGrants = edgeData?.hasDbGrants ?? false
+  const isFaded = edgeData?.isFaded ?? false
+
+  // Get opacity from style (set by lineage focus)
+  const opacity = (style?.opacity as number) ?? 1
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -52,7 +57,7 @@ function GrantEdge({
         style={style}
         markerEnd={markerEnd}
       />
-      {labelText && (
+      {labelText && opacity > 0 && (
         <EdgeLabelRenderer>
           <div
             style={{

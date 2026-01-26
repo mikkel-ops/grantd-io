@@ -311,32 +311,22 @@ function buildCanvasLayout(
   }
 
   // Create edges from roles to databases
-  console.log('Building role-to-database edges. Roles with grants:', Array.from(roleDbGrants.keys()))
-  console.log('Available role node IDs:', allRoleNodes.map(n => n.id))
-  console.log('Available database node IDs:', databaseNodes.map(n => n.id))
   const roleToDatabaseEdges: Edge[] = []
   for (const [roleName, dbMap] of roleDbGrants) {
     const roleNodeId = `role-${roleName}`
     const roleNodeExists = allRoleNodes.some(n => n.id === roleNodeId)
-    if (!roleNodeExists) {
-      console.log(`Role node not found: ${roleNodeId}`)
-      continue
-    }
+    if (!roleNodeExists) continue
 
     for (const [dbName, data] of dbMap) {
       const dbNodeId = `db-${dbName}`
       const dbNodeExists = databaseNodes.some(n => n.id === dbNodeId)
-      if (!dbNodeExists) {
-        console.log(`Database node not found: ${dbNodeId}`)
-        continue
-      }
+      if (!dbNodeExists) continue
 
       const schemaCount = data.schemas.size
       const hasDbGrants = data.dbPrivileges.size > 0
 
       // Only create edge if there are actual grants
       if (schemaCount > 0 || hasDbGrants) {
-        console.log(`Creating edge: ${roleNodeId} -> ${dbNodeId} (${schemaCount} schemas, hasDbGrants: ${hasDbGrants})`)
         roleToDatabaseEdges.push({
           id: `role-db-edge-${roleName}-${dbName}`,
           source: roleNodeId,
@@ -354,8 +344,6 @@ function buildCanvasLayout(
     }
   }
 
-  console.log('Total role-to-database edges created:', roleToDatabaseEdges.length)
-
   // Add button nodes
   const addUserNode: Node = {
     id: 'add-user-button',
@@ -366,8 +354,8 @@ function buildCanvasLayout(
     draggable: false,
   }
 
-  const addRoleNode: Node = {
-    id: 'add-role-button',
+  const addBusinessRoleNode: Node = {
+    id: 'add-business-role-button',
     type: 'addButton',
     position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.START_Y + businessRoles.length * LAYOUT.ROW_HEIGHT },
     data: { label: 'Add Business Role', type: 'role', onClick: () => {} },
@@ -375,7 +363,16 @@ function buildCanvasLayout(
     draggable: false,
   }
 
-  const allNodes = [...userNodes, ...allRoleNodes, ...databaseNodes, addUserNode, addRoleNode]
+  const addFunctionalRoleNode: Node = {
+    id: 'add-functional-role-button',
+    type: 'addButton',
+    position: { x: LAYOUT.FUNCTIONAL_ROLE_X, y: LAYOUT.START_Y + functionalRoles.length * LAYOUT.ROW_HEIGHT },
+    data: { label: 'Add Functional Role', type: 'functional-role', onClick: () => {} },
+    selectable: false,
+    draggable: false,
+  }
+
+  const allNodes = [...userNodes, ...allRoleNodes, ...databaseNodes, addUserNode, addBusinessRoleNode, addFunctionalRoleNode]
   const allEdges = [...assignmentEdges, ...roleToRoleEdges, ...roleToDatabaseEdges]
 
   return { nodes: allNodes, edges: allEdges }
