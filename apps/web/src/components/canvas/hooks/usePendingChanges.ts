@@ -6,12 +6,15 @@ import { LAYOUT } from './useCanvasData'
 
 export interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege'
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege'
   userName?: string
   roleName?: string
   userDetails?: UserDetails
   privilegeGrants?: PrivilegeGrant[]
   databaseName?: string
+  schemaName?: string
+  privilege?: string
+  objectType?: 'DATABASE' | 'SCHEMA'
 }
 
 interface UsePendingChangesResult {
@@ -21,6 +24,7 @@ interface UsePendingChangesResult {
   addCreateUser: (details: UserDetails) => void
   addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType?: 'business' | 'functional') => void
   addGrantPrivilege: (roleName: string, databaseName: string, grants: PrivilegeGrant[]) => void
+  togglePrivilege: (roleName: string, databaseName: string, privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string, isCurrentlyGranted?: boolean) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
   cancelRevoke: (changeId: string) => void
@@ -205,6 +209,63 @@ export function usePendingChanges(
     ])
   }, [setEdges])
 
+  const togglePrivilege = useCallback((
+    roleName: string,
+    databaseName: string,
+    privilege: string,
+    objectType: 'DATABASE' | 'SCHEMA',
+    schemaName?: string,
+    isCurrentlyGranted?: boolean
+  ) => {
+    const objectName = objectType === 'SCHEMA' && schemaName ? `${databaseName}.${schemaName}` : databaseName
+    const changeId = `toggle-${roleName}-${objectName}-${privilege}`
+
+    // Check if there's already a pending change for this privilege
+    const existingChange = pendingChanges.find(c => c.id === changeId)
+
+    if (existingChange) {
+      // Toggle off - remove the pending change
+      setPendingChanges(prev => prev.filter(c => c.id !== changeId))
+      return
+    }
+
+    // Add new pending change
+    if (isCurrentlyGranted) {
+      // Currently granted, so this is a revoke
+      setPendingChanges(prev => [
+        ...prev,
+        {
+          id: changeId,
+          type: 'revoke_privilege',
+          roleName,
+          databaseName,
+          schemaName,
+          privilege,
+          objectType,
+        },
+      ])
+    } else {
+      // Not currently granted, so this is a grant
+      setPendingChanges(prev => [
+        ...prev,
+        {
+          id: changeId,
+          type: 'grant_privilege',
+          roleName,
+          databaseName,
+          schemaName,
+          privilege,
+          objectType,
+          privilegeGrants: [{
+            privilege,
+            objectType,
+            objectName,
+          }],
+        },
+      ])
+    }
+  }, [pendingChanges])
+
   const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
 
@@ -298,6 +359,7 @@ export function usePendingChanges(
     addCreateUser,
     addCreateRole,
     addGrantPrivilege,
+    togglePrivilege,
     removePendingChange,
     clearAllChanges,
     cancelRevoke,

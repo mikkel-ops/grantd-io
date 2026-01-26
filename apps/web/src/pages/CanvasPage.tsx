@@ -79,6 +79,7 @@ export default function CanvasPage() {
     addCreateUser,
     addCreateRole,
     addGrantPrivilege,
+    togglePrivilege,
     removePendingChange,
     clearAllChanges,
   } = usePendingChanges(nodes, setNodes, edges, setEdges)
@@ -91,54 +92,85 @@ export default function CanvasPage() {
     setEdges
   )
 
+  // Callback for privilege toggle from database nodes
+  const handlePrivilegeToggle = useCallback((
+    databaseName: string,
+    privilege: string,
+    objectType: 'DATABASE' | 'SCHEMA',
+    schemaName?: string,
+    isCurrentlyGranted?: boolean
+  ) => {
+    if (!focusedRole) return
+    togglePrivilege(focusedRole, databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
+  }, [focusedRole, togglePrivilege])
+
+  // Build pending privilege changes map for database nodes
+  const pendingPrivilegesByDb = useCallback(() => {
+    const map = new Map<string, { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke' }[]>()
+    for (const change of pendingChanges) {
+      if ((change.type === 'grant_privilege' || change.type === 'revoke_privilege') && change.databaseName) {
+        const dbName = change.databaseName
+        if (!map.has(dbName)) {
+          map.set(dbName, [])
+        }
+        if (change.privilege && change.objectType) {
+          map.get(dbName)!.push({
+            privilege: change.privilege,
+            objectType: change.objectType,
+            schemaName: change.schemaName,
+            changeType: change.type === 'grant_privilege' ? 'grant' : 'revoke',
+          })
+        }
+      }
+    }
+    return map
+  }, [pendingChanges])
+
   // Update database nodes with grant highlights when a role is focused
   useEffect(() => {
-    if (focusedRoleGrants.size > 0) {
+    const pendingByDb = pendingPrivilegesByDb()
+
+    if (focusedRoleGrants.size > 0 || focusedRole) {
       setNodes(nds => nds.map(node => {
         if (node.type === 'databaseGroup' || node.type === 'database') {
           const dbName = node.id.replace('db-', '')
           const grantDetails = focusedRoleGrants.get(dbName)
-          if (grantDetails) {
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                highlightedDbPrivileges: grantDetails.dbPrivileges,
-                highlightedSchemas: grantDetails.schemas,
-              },
-            }
-          } else {
-            // Clear highlights for databases without grants
-            return {
-              ...node,
-              data: {
-                ...node.data,
-                highlightedDbPrivileges: undefined,
-                highlightedSchemas: undefined,
-              },
-            }
+          const pendingChangesForDb = pendingByDb.get(dbName)
+
+          return {
+            ...node,
+            data: {
+              ...node.data,
+              highlightedDbPrivileges: grantDetails?.dbPrivileges,
+              highlightedSchemas: grantDetails?.schemas,
+              focusedRole: focusedRole || undefined,
+              pendingPrivilegeChanges: pendingChangesForDb,
+              onPrivilegeToggle: handlePrivilegeToggle,
+            },
           }
         }
         return node
       }))
     } else {
-      // Clear all highlights when no role is focused
+      // Clear all highlights and callbacks when no role is focused
       setNodes(nds => nds.map(node => {
-        if ((node.type === 'databaseGroup' || node.type === 'database') &&
-            (node.data.highlightedDbPrivileges || node.data.highlightedSchemas)) {
+        if (node.type === 'databaseGroup' || node.type === 'database') {
           return {
             ...node,
             data: {
               ...node.data,
               highlightedDbPrivileges: undefined,
               highlightedSchemas: undefined,
+              focusedRole: undefined,
+              pendingPrivilegeChanges: undefined,
+              onPrivilegeToggle: undefined,
             },
           }
         }
         return node
       }))
     }
-  }, [focusedRoleGrants, setNodes])
+  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, pendingPrivilegesByDb])
 
   // Database expansion - shows schemas when dragging to a database or clicking
   const {
@@ -548,6 +580,38 @@ export default function CanvasPage() {
               object_name: grant.objectName,
             },
           }))
+        } else if (change.type === 'grant_privilege' && change.privilege && change.objectType) {
+          // Single privilege grant from toggle
+          const objectName = change.objectType === 'SCHEMA' && change.schemaName
+            ? `${change.databaseName}.${change.schemaName}`
+            : change.databaseName
+          return [{
+            change_type: 'grant',
+            object_type: change.objectType.toLowerCase(),
+            object_name: objectName,
+            details: {
+              role_name: change.roleName,
+              privilege: change.privilege,
+              object_type: change.objectType,
+              object_name: objectName,
+            },
+          }]
+        } else if (change.type === 'revoke_privilege' && change.privilege && change.objectType) {
+          // Single privilege revoke from toggle
+          const objectName = change.objectType === 'SCHEMA' && change.schemaName
+            ? `${change.databaseName}.${change.schemaName}`
+            : change.databaseName
+          return [{
+            change_type: 'revoke',
+            object_type: change.objectType.toLowerCase(),
+            object_name: objectName,
+            details: {
+              role_name: change.roleName,
+              privilege: change.privilege,
+              object_type: change.objectType,
+              object_name: objectName,
+            },
+          }]
         } else {
           return [{
             change_type: change.type === 'grant_role' ? 'grant' : 'revoke',
@@ -608,11 +672,7 @@ export default function CanvasPage() {
       />
 
       <div className="flex gap-4 h-[calc(100vh-220px)]">
-        <div
-          className={`border rounded-lg overflow-hidden bg-slate-50 ${
-            pendingChanges.length > 0 ? 'flex-1' : 'w-full'
-          }`}
-        >
+        <div className="flex-1 border rounded-lg overflow-hidden bg-slate-50">
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -672,17 +732,19 @@ function buildChangesetTitle(changes: PendingChange[]): string {
   const createRoleCount = changes.filter(c => c.type === 'create_role').length
   const grantCount = changes.filter(c => c.type === 'grant_role').length
   const revokeCount = changes.filter(c => c.type === 'revoke_role').length
-  const privilegeCount = changes.filter(c => c.type === 'grant_privilege').reduce(
-    (sum, c) => sum + (c.privilegeGrants?.length || 0),
+  const grantPrivilegeCount = changes.filter(c => c.type === 'grant_privilege').reduce(
+    (sum, c) => sum + (c.privilegeGrants?.length || 1),
     0
   )
+  const revokePrivilegeCount = changes.filter(c => c.type === 'revoke_privilege').length
 
   const parts = []
   if (createUserCount > 0) parts.push(`${createUserCount} new user${createUserCount > 1 ? 's' : ''}`)
   if (createRoleCount > 0) parts.push(`${createRoleCount} new role${createRoleCount > 1 ? 's' : ''}`)
   if (grantCount > 0) parts.push(`${grantCount} role grant${grantCount > 1 ? 's' : ''}`)
-  if (revokeCount > 0) parts.push(`${revokeCount} revoke${revokeCount > 1 ? 's' : ''}`)
-  if (privilegeCount > 0) parts.push(`${privilegeCount} privilege${privilegeCount > 1 ? 's' : ''}`)
+  if (revokeCount > 0) parts.push(`${revokeCount} role revoke${revokeCount > 1 ? 's' : ''}`)
+  if (grantPrivilegeCount > 0) parts.push(`${grantPrivilegeCount} privilege grant${grantPrivilegeCount > 1 ? 's' : ''}`)
+  if (revokePrivilegeCount > 0) parts.push(`${revokePrivilegeCount} privilege revoke${revokePrivilegeCount > 1 ? 's' : ''}`)
 
   return `Access Canvas changes (${parts.join(', ')})`
 }

@@ -16,6 +16,13 @@ export interface SchemaGrantInfo {
 const DB_PRIVILEGES = ['USAGE', 'CREATE SCHEMA', 'MONITOR', 'MODIFY']
 const SCHEMA_PRIVILEGES = ['USAGE', 'CREATE TABLE', 'CREATE VIEW', 'MODIFY', 'MONITOR']
 
+export interface PendingPrivilegeChange {
+  privilege: string
+  objectType: 'DATABASE' | 'SCHEMA'
+  schemaName?: string
+  changeType: 'grant' | 'revoke'
+}
+
 export interface DatabaseGroupNodeData {
   label: string
   schemaCount?: number
@@ -26,11 +33,24 @@ export interface DatabaseGroupNodeData {
   highlightedDbPrivileges?: string[]
   highlightedSchemas?: SchemaGrantInfo[]
   isFaded?: boolean
+  // Focused role for privilege toggling
+  focusedRole?: string
+  // Pending privilege changes for this database
+  pendingPrivilegeChanges?: PendingPrivilegeChange[]
+  // Callback for privilege toggle
+  onPrivilegeToggle?: (
+    databaseName: string,
+    privilege: string,
+    objectType: 'DATABASE' | 'SCHEMA',
+    schemaName?: string,
+    isCurrentlyGranted?: boolean
+  ) => void
 }
 
 function DatabaseGroupNode({ data, id }: NodeProps) {
   const nodeData = data as unknown as DatabaseGroupNodeData
   const isExpanded = nodeData.isExpanded && nodeData.schemas && nodeData.schemas.length > 0
+  const databaseName = nodeData.label
 
   // Create a map for quick lookup of schema grants
   const schemaGrantsMap = new Map<string, string[]>()
@@ -41,6 +61,23 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
   }
   const hasHighlights = (nodeData.highlightedDbPrivileges && nodeData.highlightedDbPrivileges.length > 0) ||
                         (nodeData.highlightedSchemas && nodeData.highlightedSchemas.length > 0)
+
+  // Helper to check if a privilege has a pending change
+  const getPendingChange = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string) => {
+    if (!nodeData.pendingPrivilegeChanges) return null
+    return nodeData.pendingPrivilegeChanges.find(
+      p => p.privilege === privilege &&
+           p.objectType === objectType &&
+           (objectType === 'DATABASE' || p.schemaName === schemaName)
+    )
+  }
+
+  // Handle privilege click
+  const handlePrivilegeClick = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', isCurrentlyGranted: boolean, schemaName?: string) => {
+    if (nodeData.onPrivilegeToggle && nodeData.focusedRole) {
+      nodeData.onPrivilegeToggle(databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
+    }
+  }
 
   return (
     <div
@@ -107,22 +144,36 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
           <div className="flex flex-wrap gap-1 px-2 pb-2">
             {DB_PRIVILEGES.map((priv) => {
               const isGranted = nodeData.highlightedDbPrivileges?.includes(priv)
+              const pendingChange = getPendingChange(priv, 'DATABASE')
+              const isPendingGrant = pendingChange?.changeType === 'grant'
+              const isPendingRevoke = pendingChange?.changeType === 'revoke'
+              const canClick = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+
               return (
                 <div key={priv} className="relative">
                   <Handle
                     type="target"
                     position={Position.Left}
                     id={`db-priv-${priv}`}
-                    className={`w-2 h-2 !left-[-4px] ${isGranted ? '!bg-green-500' : '!bg-cyan-400'}`}
+                    className={`w-2 h-2 !left-[-4px] ${isGranted || isPendingGrant ? '!bg-green-500' : '!bg-cyan-400'}`}
                   />
                   <span
-                    className={`text-[9px] px-1.5 py-0.5 rounded border cursor-pointer transition-colors ${
-                      isGranted
+                    onClick={() => canClick && handlePrivilegeClick(priv, 'DATABASE', !!isGranted)}
+                    className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${
+                      canClick ? 'cursor-pointer' : 'cursor-default'
+                    } ${
+                      isPendingGrant
+                        ? 'bg-green-200 text-green-800 border-green-500 font-medium ring-1 ring-green-400'
+                        : isPendingRevoke
+                        ? 'bg-red-100 text-red-700 border-red-400 font-medium line-through ring-1 ring-red-300'
+                        : isGranted
                         ? 'bg-green-100 text-green-700 border-green-300 font-medium'
-                        : 'bg-cyan-50 text-cyan-600 border-cyan-200 hover:border-cyan-400 hover:bg-cyan-100'
+                        : canClick
+                        ? 'bg-cyan-50 text-cyan-600 border-cyan-200 hover:border-green-400 hover:bg-green-50 hover:text-green-600'
+                        : 'bg-cyan-50 text-cyan-600 border-cyan-200'
                     }`}
                   >
-                    {priv}
+                    {isPendingGrant && '+ '}{isPendingRevoke && '- '}{priv}
                   </span>
                 </div>
               )
@@ -159,22 +210,36 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                       <div className="flex flex-wrap gap-1 mt-1">
                         {SCHEMA_PRIVILEGES.slice(0, 4).map((priv) => {
                           const isGranted = schemaPrivileges?.includes(priv)
+                          const pendingChange = getPendingChange(priv, 'SCHEMA', schema.name)
+                          const isPendingGrant = pendingChange?.changeType === 'grant'
+                          const isPendingRevoke = pendingChange?.changeType === 'revoke'
+                          const canClick = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+
                           return (
                             <div key={priv} className="relative">
                               <Handle
                                 type="target"
                                 position={Position.Left}
                                 id={`schema-${schema.name}-priv-${priv}`}
-                                className={`w-1.5 h-1.5 !left-[-3px] ${isGranted ? '!bg-green-500' : '!bg-cyan-300'}`}
+                                className={`w-1.5 h-1.5 !left-[-3px] ${isGranted || isPendingGrant ? '!bg-green-500' : '!bg-cyan-300'}`}
                               />
                               <span
-                                className={`text-[8px] px-1 py-0.5 rounded border ${
-                                  isGranted
+                                onClick={() => canClick && handlePrivilegeClick(priv, 'SCHEMA', !!isGranted, schema.name)}
+                                className={`text-[8px] px-1 py-0.5 rounded border transition-colors ${
+                                  canClick ? 'cursor-pointer' : 'cursor-default'
+                                } ${
+                                  isPendingGrant
+                                    ? 'bg-green-200 text-green-800 border-green-500 font-medium ring-1 ring-green-400'
+                                    : isPendingRevoke
+                                    ? 'bg-red-100 text-red-700 border-red-400 font-medium line-through ring-1 ring-red-300'
+                                    : isGranted
                                     ? 'bg-green-100 text-green-700 border-green-300'
-                                    : 'bg-gray-50 text-gray-500 border-gray-200 hover:border-cyan-300 hover:bg-cyan-50'
+                                    : canClick
+                                    ? 'bg-gray-50 text-gray-500 border-gray-200 hover:border-green-300 hover:bg-green-50 hover:text-green-600'
+                                    : 'bg-gray-50 text-gray-500 border-gray-200'
                                 }`}
                               >
-                                {priv}
+                                {isPendingGrant && '+ '}{isPendingRevoke && '- '}{priv}
                               </span>
                             </div>
                           )
