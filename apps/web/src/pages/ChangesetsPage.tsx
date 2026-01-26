@@ -157,7 +157,7 @@ export default function ChangesetsPage() {
       .sort((a, b) => a.execution_order - b.execution_order)
       .map((change, idx) => {
         return `-- Statement ${idx + 1}: ${change.change_type} ${change.object_type} ${change.object_name}
-${change.sql_statement};
+${change.sql_statement}
 `
       })
       .join('\n')

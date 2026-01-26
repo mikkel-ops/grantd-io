@@ -314,6 +314,25 @@ async def list_roles(
     return roles
 
 
+@router.get("/role-assignments", response_model=list[RoleAssignmentResponse])
+async def list_all_role_assignments(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+    limit: int = Query(1000, le=5000),
+):
+    """Get all role assignments for a connection."""
+    verify_connection_access(db, connection_id, org_id)
+
+    assignments = db.execute(
+        select(RoleAssignment)
+        .where(RoleAssignment.connection_id == connection_id)
+        .limit(limit)
+    ).scalars().all()
+
+    return assignments
+
+
 @router.get("/roles/{role_name}/assignments", response_model=list[RoleAssignmentResponse])
 async def get_role_assignments(
     role_name: str,
@@ -507,6 +526,95 @@ async def get_role_details(
     )
 
 
+class PlatformDatabaseResponse(BaseModel):
+    """Response for a database object."""
+    name: str
+    schema_count: int
+    is_imported: bool = False
+
+
+@router.get("/databases", response_model=list[PlatformDatabaseResponse])
+async def list_databases(
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """List all unique databases for a connection with schema counts."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get unique databases from grants
+    db_query = db.execute(
+        select(distinct(PlatformGrant.object_database))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_database.isnot(None),
+        )
+    ).scalars().all()
+
+    # Get schema counts per database
+    databases = []
+    for db_name in sorted(db_query):
+        if not db_name:
+            continue
+
+        # Count unique schemas
+        schema_count = db.execute(
+            select(func.count(distinct(PlatformGrant.object_schema)))
+            .where(
+                PlatformGrant.connection_id == connection_id,
+                PlatformGrant.object_database == db_name,
+                PlatformGrant.object_schema.isnot(None),
+            )
+        ).scalar() or 0
+
+        # Check if imported
+        is_imported = db_name.upper() in ("SNOWFLAKE_SAMPLE_DATA", "SNOWFLAKE")
+
+        databases.append(PlatformDatabaseResponse(
+            name=db_name,
+            schema_count=schema_count,
+            is_imported=is_imported,
+        ))
+
+    return databases
+
+
+class SchemaResponse(BaseModel):
+    name: str
+    full_name: str
+
+
+@router.get("/databases/{database_name}/schemas", response_model=list[SchemaResponse])
+async def list_database_schemas(
+    database_name: str,
+    connection_id: UUID,
+    org_id: CurrentOrgId,
+    db: DbSession,
+):
+    """List all schemas for a specific database."""
+    verify_connection_access(db, connection_id, org_id)
+
+    # Get unique schemas for this database from grants
+    schema_query = db.execute(
+        select(distinct(PlatformGrant.object_schema))
+        .where(
+            PlatformGrant.connection_id == connection_id,
+            PlatformGrant.object_database.ilike(database_name),
+            PlatformGrant.object_schema.isnot(None),
+        )
+    ).scalars().all()
+
+    schemas = []
+    for schema_name in sorted(schema_query):
+        if schema_name:
+            schemas.append(SchemaResponse(
+                name=schema_name,
+                full_name=f"{database_name}.{schema_name}",
+            ))
+
+    return schemas
+
+
 @router.get("/grants", response_model=list[PlatformGrantResponse])
 async def list_grants(
     connection_id: UUID,
@@ -514,6 +622,7 @@ async def list_grants(
     db: DbSession,
     grantee_name: str = Query(None, description="Filter by grantee"),
     object_type: str = Query(None, description="Filter by object type"),
+    exclude_system_roles: bool = Query(False, description="Exclude grants to system roles"),
     limit: int = Query(100, le=500),
     offset: int = Query(0),
 ):
@@ -527,6 +636,14 @@ async def list_grants(
 
     if object_type:
         query = query.where(PlatformGrant.object_type == object_type)
+
+    if exclude_system_roles:
+        # Exclude common Snowflake system roles
+        system_roles = [
+            'ACCOUNTADMIN', 'SECURITYADMIN', 'USERADMIN', 'SYSADMIN',
+            'ORGADMIN', 'PUBLIC', 'SNOWFLAKE'
+        ]
+        query = query.where(~PlatformGrant.grantee_name.in_(system_roles))
 
     grants = db.execute(query.limit(limit).offset(offset)).scalars().all()
 

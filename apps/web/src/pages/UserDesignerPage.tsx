@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import {
   UserCircle, Loader2, Search, Database, ChevronLeft,
-  Shield, Code, AlertCircle, Check, Warehouse
+  Shield, Code, AlertCircle, Check
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { api } from '@/lib/api'
@@ -106,7 +106,7 @@ export default function UserDesignerPage() {
         if (token) {
           const data = await api.get<Connection[]>('/connections', token)
           setConnections(data)
-          if (!selectedConnectionId && data.length > 0) {
+          if (!selectedConnectionId && data.length > 0 && data[0]) {
             setSelectedConnectionId(data[0].id)
           }
         }
