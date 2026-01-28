@@ -183,30 +183,59 @@ export function usePendingChanges(
   }, [nodes, setNodes, setEdges])
 
   const addGrantPrivilege = useCallback((roleName: string, databaseName: string, grants: PrivilegeGrant[]) => {
-    const changeId = `priv-${roleName}-${databaseName}-${Date.now()}`
+    // For each grant, create a separate pending change with consistent ID format
+    // This ensures they show up correctly in the UI and can be toggled off
+    for (const grant of grants) {
+      const objectName = grant.objectType === 'SCHEMA'
+        ? grant.objectName  // Already includes database.schema
+        : databaseName
+      const schemaName = grant.objectType === 'SCHEMA'
+        ? grant.objectName.split('.')[1]
+        : undefined
+      const changeId = `toggle-${roleName}-${objectName}-${grant.privilege}`
 
-    // Add visual edge from role to database
-    setEdges(eds => [
-      ...eds,
-      {
-        id: `privilege-edge-${changeId}`,
-        source: `role-${roleName}`,
-        target: `db-${databaseName}`,
-        animated: true,
-        style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
-      },
-    ])
+      // Check if this exact change already exists - if so, skip it
+      setPendingChanges(prev => {
+        if (prev.some(c => c.id === changeId)) {
+          return prev
+        }
+        return [
+          ...prev,
+          {
+            id: changeId,
+            type: 'grant_privilege' as const,
+            roleName,
+            databaseName,
+            schemaName,
+            privilege: grant.privilege,
+            objectType: grant.objectType,
+            privilegeGrants: [grant],
+          },
+        ]
+      })
+    }
 
-    setPendingChanges(prev => [
-      ...prev,
-      {
-        id: changeId,
-        type: 'grant_privilege',
-        roleName,
-        databaseName,
-        privilegeGrants: grants,
-      },
-    ])
+    // Add visual edge from role to database (only if we added changes)
+    const firstGrant = grants[0]
+    if (firstGrant) {
+      const edgeId = `privilege-edge-${roleName}-${databaseName}-${firstGrant.privilege}`
+      setEdges(eds => {
+        // Don't add duplicate edges
+        if (eds.some(e => e.id === edgeId)) {
+          return eds
+        }
+        return [
+          ...eds,
+          {
+            id: edgeId,
+            source: `role-${roleName}`,
+            target: `db-${databaseName}`,
+            animated: true,
+            style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
+          },
+        ]
+      })
+    }
   }, [setEdges])
 
   const togglePrivilege = useCallback((

@@ -21,6 +21,7 @@ export interface PendingPrivilegeChange {
   objectType: 'DATABASE' | 'SCHEMA'
   schemaName?: string
   changeType: 'grant' | 'revoke'
+  roleName?: string  // For building changeId when removing
 }
 
 export interface DatabaseGroupNodeData {
@@ -37,13 +38,18 @@ export interface DatabaseGroupNodeData {
   focusedRole?: string
   // Pending privilege changes for this database
   pendingPrivilegeChanges?: PendingPrivilegeChange[]
-  // Callback for privilege toggle
+  // Callback for privilege toggle (when role is focused)
   onPrivilegeToggle?: (
     databaseName: string,
     privilege: string,
     objectType: 'DATABASE' | 'SCHEMA',
     schemaName?: string,
     isCurrentlyGranted?: boolean
+  ) => void
+  // Callback for removing a pending change (when clicking on a pending privilege)
+  onRemovePendingChange?: (
+    changeId: string,
+    changeType: 'grant_privilege' | 'revoke_privilege'
   ) => void
 }
 
@@ -74,25 +80,41 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
 
   // Handle privilege click
   const handlePrivilegeClick = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', isCurrentlyGranted: boolean, schemaName?: string) => {
-    if (nodeData.onPrivilegeToggle && nodeData.focusedRole) {
+    // Check if there's a pending change for this privilege
+    const pendingChange = getPendingChange(privilege, objectType, schemaName)
+
+    if (pendingChange && pendingChange.roleName && nodeData.onRemovePendingChange) {
+      // If there's a pending change, clicking removes it
+      const objectName = objectType === 'SCHEMA' && schemaName
+        ? `${databaseName}.${schemaName}`
+        : databaseName
+      const changeId = `toggle-${pendingChange.roleName}-${objectName}-${privilege}`
+      const changeType = pendingChange.changeType === 'grant' ? 'grant_privilege' : 'revoke_privilege'
+      nodeData.onRemovePendingChange(changeId, changeType)
+    } else if (nodeData.onPrivilegeToggle && nodeData.focusedRole) {
+      // If no pending change and a role is focused, toggle the privilege
       nodeData.onPrivilegeToggle(databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
     }
   }
 
   return (
     <div
-      className={`shadow-md rounded-lg bg-gradient-to-b from-cyan-50 to-white w-[250px] cursor-pointer transition-opacity duration-200 ${
+      className={`relative shadow-md rounded-lg bg-gradient-to-b from-cyan-50 to-white w-[250px] cursor-pointer transition-opacity duration-200 ${
         isExpanded ? 'pb-2' : ''
       } ${hasHighlights ? 'border-2 border-green-400 ring-2 ring-green-200' : 'border-2 border-cyan-400'} ${nodeData.isFaded ? 'opacity-20' : ''}`}
     >
+      {/* Main target handle - large invisible hit area for easier connections */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={`${id}-db`}
+        className="!w-10 !h-full !bg-transparent !border-0 !rounded-none !transform-none !top-0 !-left-5"
+      />
+      {/* Visual dot for main database target */}
+      <div className={`absolute left-0 top-6 -translate-x-1/2 w-3 h-3 rounded-full pointer-events-none ${hasHighlights ? 'bg-green-500' : 'bg-cyan-500'}`} />
+
       {/* Main database header - always visible */}
       <div className="px-4 py-3">
-        <Handle
-          type="target"
-          position={Position.Left}
-          id={`${id}-db`}
-          className={`w-3 h-3 ${hasHighlights ? '!bg-green-500' : '!bg-cyan-500'}`}
-        />
         <div className="flex items-center gap-2">
           <div className={`rounded-full p-1.5 flex-shrink-0 ${hasHighlights ? 'bg-green-100' : 'bg-cyan-100'}`}>
             <Database className={`h-4 w-4 ${hasHighlights ? 'text-green-600' : 'text-cyan-600'}`} />
@@ -147,7 +169,10 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
               const pendingChange = getPendingChange(priv, 'DATABASE')
               const isPendingGrant = pendingChange?.changeType === 'grant'
               const isPendingRevoke = pendingChange?.changeType === 'revoke'
-              const canClick = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+              // Can click if: (1) role is focused and we have toggle callback, OR (2) there's a pending change we can remove
+              const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+              const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
+              const canClick = canToggle || canRemovePending
 
               return (
                 <div key={priv} className="relative">
@@ -168,7 +193,7 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                         ? 'bg-red-100 text-red-700 border-red-400 font-medium line-through ring-1 ring-red-300'
                         : isGranted
                         ? 'bg-green-100 text-green-700 border-green-300 font-medium'
-                        : canClick
+                        : canToggle
                         ? 'bg-cyan-50 text-cyan-600 border-cyan-200 hover:border-green-400 hover:bg-green-50 hover:text-green-600'
                         : 'bg-cyan-50 text-cyan-600 border-cyan-200'
                     }`}
@@ -213,7 +238,10 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                           const pendingChange = getPendingChange(priv, 'SCHEMA', schema.name)
                           const isPendingGrant = pendingChange?.changeType === 'grant'
                           const isPendingRevoke = pendingChange?.changeType === 'revoke'
-                          const canClick = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+                          // Can click if: (1) role is focused and we have toggle callback, OR (2) there's a pending change we can remove
+                          const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
+                          const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
+                          const canClick = canToggle || canRemovePending
 
                           return (
                             <div key={priv} className="relative">
@@ -234,7 +262,7 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                                     ? 'bg-red-100 text-red-700 border-red-400 font-medium line-through ring-1 ring-red-300'
                                     : isGranted
                                     ? 'bg-green-100 text-green-700 border-green-300'
-                                    : canClick
+                                    : canToggle
                                     ? 'bg-gray-50 text-gray-500 border-gray-200 hover:border-green-300 hover:bg-green-50 hover:text-green-600'
                                     : 'bg-gray-50 text-gray-500 border-gray-200'
                                 }`}

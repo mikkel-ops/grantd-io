@@ -106,9 +106,17 @@ export default function CanvasPage() {
     togglePrivilege(focusedRole, databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
   }, [focusedRole, togglePrivilege])
 
+  // Callback for removing pending privilege changes from database nodes
+  const handleRemovePendingChange = useCallback((
+    changeId: string,
+    changeType: 'grant_privilege' | 'revoke_privilege'
+  ) => {
+    removePendingChange(changeId, changeType)
+  }, [removePendingChange])
+
   // Build pending privilege changes map for database nodes (memoized value, not function)
   const pendingPrivilegesByDb = useMemo(() => {
-    const map = new Map<string, { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke' }[]>()
+    const map = new Map<string, { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke'; roleName?: string }[]>()
     for (const change of pendingChanges) {
       if ((change.type === 'grant_privilege' || change.type === 'revoke_privilege') && change.databaseName) {
         const dbName = change.databaseName
@@ -121,6 +129,7 @@ export default function CanvasPage() {
             objectType: change.objectType,
             schemaName: change.schemaName,
             changeType: change.type === 'grant_privilege' ? 'grant' : 'revoke',
+            roleName: change.roleName,
           })
         }
       }
@@ -146,6 +155,7 @@ export default function CanvasPage() {
               focusedRole: focusedRole || undefined,
               pendingPrivilegeChanges: pendingChangesForDb,
               onPrivilegeToggle: handlePrivilegeToggle,
+              onRemovePendingChange: handleRemovePendingChange,
             },
           }
         }
@@ -167,13 +177,14 @@ export default function CanvasPage() {
               // Keep pending changes visible even when unfocused
               pendingPrivilegeChanges: pendingChangesForDb,
               onPrivilegeToggle: undefined,
+              onRemovePendingChange: handleRemovePendingChange,
             },
           }
         }
         return node
       }))
     }
-  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, pendingPrivilegesByDb])
+  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb])
 
   // Database expansion - shows schemas when dragging to a database or clicking
   const {
@@ -434,13 +445,17 @@ export default function CanvasPage() {
           return
         }
 
-        // For general database connections (not to specific privileges),
-        // expand the database so user can click on specific privileges
-        // The database should already be expanded when dragging starts
+        // For general database connections (dropping on the database node itself),
+        // grant USAGE privilege by default - the most common database-level grant
+        addGrantPrivilege(roleName, databaseName, [{
+          privilege: 'USAGE',
+          objectType: 'DATABASE',
+          objectName: databaseName,
+        }])
         return
       }
     },
-    [setEdges, addGrantRole]
+    [setEdges, addGrantRole, addGrantPrivilege]
   )
 
   // Handle node clicks
@@ -702,6 +717,7 @@ export default function CanvasPage() {
             fitView
             snapToGrid
             snapGrid={[20, 20]}
+            connectionRadius={40}
           >
             <Controls />
             <Background variant={BackgroundVariant.Dots} gap={20} size={1} />
