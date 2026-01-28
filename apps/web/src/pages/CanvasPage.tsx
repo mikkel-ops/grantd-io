@@ -1,4 +1,4 @@
-import { useCallback, useState, useEffect, useRef, useMemo } from 'react'
+import { useCallback, useState, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import {
   ReactFlow,
   Node,
@@ -94,6 +94,14 @@ export default function CanvasPage() {
     setEdges
   )
 
+  // Database expansion - shows schemas when dragging to a database or clicking
+  const {
+    expandedDatabase,
+    toggleDatabase,
+    expandDatabase,
+    collapseDatabase,
+  } = useDatabaseExpansion(baseNodes, setNodes)
+
   // Callback for privilege toggle from database nodes
   const handlePrivilegeToggle = useCallback((
     databaseName: string,
@@ -138,61 +146,46 @@ export default function CanvasPage() {
   }, [pendingChanges])
 
   // Update database nodes with grant highlights when a role is focused
-  useEffect(() => {
-    if (focusedRoleGrants.size > 0 || focusedRole) {
-      setNodes(nds => nds.map(node => {
-        if (node.type === 'databaseGroup' || node.type === 'database') {
-          const dbName = node.id.replace('db-', '')
-          const grantDetails = focusedRoleGrants.get(dbName)
-          const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
+  // Also handles pending privilege changes display on database nodes
+  // Using useLayoutEffect to ensure this runs synchronously before paint,
+  // preventing race conditions with expandDatabase's setNodes call
+  useLayoutEffect(() => {
+    // Debug: Log what pending privileges we have
+    console.log('useLayoutEffect - pendingPrivilegesByDb:', Array.from(pendingPrivilegesByDb.entries()))
+    console.log('useLayoutEffect - expandedDatabase:', expandedDatabase)
+    console.log('useLayoutEffect - focusedRole:', focusedRole)
 
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              highlightedDbPrivileges: grantDetails?.dbPrivileges,
-              highlightedSchemas: grantDetails?.schemas,
-              focusedRole: focusedRole || undefined,
-              pendingPrivilegeChanges: pendingChangesForDb,
-              onPrivilegeToggle: handlePrivilegeToggle,
-              onRemovePendingChange: handleRemovePendingChange,
-            },
-          }
-        }
-        return node
-      }))
-    } else {
-      // Clear highlights and callbacks when no role is focused, but keep pending changes visible
-      setNodes(nds => nds.map(node => {
-        if (node.type === 'databaseGroup' || node.type === 'database') {
-          const dbName = node.id.replace('db-', '')
-          const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
-          return {
-            ...node,
-            data: {
-              ...node.data,
-              highlightedDbPrivileges: undefined,
-              highlightedSchemas: undefined,
-              focusedRole: undefined,
-              // Keep pending changes visible even when unfocused
-              pendingPrivilegeChanges: pendingChangesForDb,
-              onPrivilegeToggle: undefined,
-              onRemovePendingChange: handleRemovePendingChange,
-            },
-          }
-        }
-        return node
-      }))
-    }
-  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb])
+    // Always update database nodes with pending changes, regardless of focus state
+    setNodes(nds => nds.map(node => {
+      // Check both type and id prefix to catch databases during type transitions
+      if (node.type === 'databaseGroup' || node.type === 'database' || node.id.startsWith('db-')) {
+        const dbName = node.id.replace('db-', '')
+        const grantDetails = focusedRoleGrants.get(dbName)
+        const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
+        const hasFocus = focusedRoleGrants.size > 0 || focusedRole
 
-  // Database expansion - shows schemas when dragging to a database or clicking
-  const {
-    expandedDatabase,
-    toggleDatabase,
-    expandDatabase,
-    collapseDatabase,
-  } = useDatabaseExpansion(baseNodes, setNodes)
+        // Debug: Log what we're setting on the node
+        if (pendingChangesForDb) {
+          console.log(`Setting pendingPrivilegeChanges on ${dbName}:`, pendingChangesForDb)
+        }
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            highlightedDbPrivileges: hasFocus ? grantDetails?.dbPrivileges : undefined,
+            highlightedSchemas: hasFocus ? grantDetails?.schemas : undefined,
+            focusedRole: hasFocus ? (focusedRole || undefined) : undefined,
+            // ALWAYS set pending changes - this is critical for showing grants after connection
+            pendingPrivilegeChanges: pendingChangesForDb,
+            onPrivilegeToggle: hasFocus ? handlePrivilegeToggle : undefined,
+            onRemovePendingChange: handleRemovePendingChange,
+          },
+        }
+      }
+      return node
+    }))
+  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb, expandedDatabase])
 
   // Lineage focus state - track which node is focused
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
@@ -206,6 +199,9 @@ export default function CanvasPage() {
   // We compute lineage inline using current edges to include dynamic role-db edges
   useEffect(() => {
     if (!focusedNodeId) {
+      // Check if we should skip the visual reset (after a successful connection)
+      const shouldSkipReset = skipCollapseOnFocusClear.current
+
       // Clear all fading when no node is focused
       setNodes(nds => nds.map(node => ({
         ...node,
@@ -215,7 +211,7 @@ export default function CanvasPage() {
         },
       })))
 
-      // Reset edge opacity
+      // Reset edge opacity - but keep pending edges visible
       setEdges(eds => eds.map(edge => ({
         ...edge,
         style: {
@@ -224,10 +220,12 @@ export default function CanvasPage() {
         },
       })))
 
-      // Collapse any expanded database when focus is cleared
-      if (expandedDatabase) {
+      // Collapse any expanded database when focus is cleared, unless we just made a connection
+      if (expandedDatabase && !shouldSkipReset) {
         collapseDatabase()
       }
+      // Reset the skip flag after checking it
+      skipCollapseOnFocusClear.current = false
       return
     }
 
@@ -344,27 +342,62 @@ export default function CanvasPage() {
 
   // Track connection drag state
   const connectingFromRole = useRef<string | null>(null)
+  const connectionMadeToDatabase = useRef<string | null>(null)
+  // Track if we should skip collapse when clearing focus (after successful connection)
+  const skipCollapseOnFocusClear = useRef<boolean>(false)
 
   // Handle connection start - detect when dragging from a role
+  // Also activate focus mode to show lineage and allow schema-level targeting
   const onConnectStart: OnConnectStart = useCallback(
-    (_event, { nodeId }) => {
+    async (_event, { nodeId }) => {
       if (nodeId?.startsWith('role-')) {
-        connectingFromRole.current = nodeId.replace('role-', '')
+        const roleName = nodeId.replace('role-', '')
+        connectingFromRole.current = roleName
+        connectionMadeToDatabase.current = null
+
+        // Activate focus mode for this role - shows lineage and database connections
+        setFocusedNodeId(nodeId)
+        if (connectionId) {
+          const token = await getToken()
+          if (token) {
+            focusOnRole(roleName, connectionId, token)
+          }
+        }
       }
     },
-    []
+    [connectionId, getToken, focusOnRole]
   )
 
-  // Handle connection end - collapse expanded database
+  // Handle connection end - clear focus mode but keep database expanded if connection was made
   const onConnectEnd: OnConnectEnd = useCallback(() => {
+    const madeConnection = connectionMadeToDatabase.current
     connectingFromRole.current = null
-    // Collapse after a short delay to allow connection to complete
+
+    // If no connection was made, clear everything immediately
+    if (!madeConnection) {
+      setTimeout(() => {
+        clearFocus()
+        setFocusedNodeId(null)
+        if (expandedDatabase) {
+          collapseDatabase()
+        }
+      }, 100)
+      return
+    }
+
+    // If a connection WAS made, give more time for the database to expand
+    // and keep it expanded to show the lit-up privilege
     setTimeout(() => {
-      if (expandedDatabase) {
-        collapseDatabase()
-      }
-    }, 100)
-  }, [expandedDatabase, collapseDatabase])
+      // Set flag to prevent the lineage useEffect from collapsing the database
+      skipCollapseOnFocusClear.current = true
+      // Clear the database focus (role grants highlighting) but preserve pending edges
+      clearFocus()
+      // Clear the lineage focus (node fading)
+      setFocusedNodeId(null)
+      // DON'T collapse the database - keep it expanded to show the pending privilege
+      connectionMadeToDatabase.current = null
+    }, 300)  // Longer delay to let expansion complete
+  }, [expandedDatabase, collapseDatabase, clearFocus])
 
   // Handle node mouse enter - expand database when dragging from role
   const onNodeMouseEnter = useCallback(
@@ -415,26 +448,25 @@ export default function CanvasPage() {
         const roleName = params.source.replace('role-', '')
         const databaseName = params.target.replace('db-', '')
 
+        // Mark that a connection was made to this database - keeps it expanded
+        connectionMadeToDatabase.current = databaseName
+
+        // FIRST: Add the pending privilege grant
         // Check if connection is to a specific database privilege
         // targetHandle will be like "db-priv-{privilege}" for direct privilege grants
         if (params.targetHandle?.startsWith('db-priv-')) {
           const privilege = params.targetHandle.replace('db-priv-', '')
-          // Directly grant this privilege without opening modal
           addGrantPrivilege(roleName, databaseName, [{
             privilege,
             objectType: 'DATABASE',
             objectName: databaseName,
           }])
-          return
-        }
-
-        // Check if connection is to a schema-level privilege
-        // targetHandle will be like "schema-{schemaName}-priv-{privilege}"
-        if (params.targetHandle?.includes('-priv-')) {
+        } else if (params.targetHandle?.includes('-priv-')) {
+          // Check if connection is to a schema-level privilege
+          // targetHandle will be like "schema-{schemaName}-priv-{privilege}"
           const parts = params.targetHandle.split('-priv-')
           const schemaName = parts[0]?.replace('schema-', '')
           const privilege = parts[1]
-          // Directly grant this privilege to the schema if we have valid parts
           if (schemaName && privilege) {
             addGrantPrivilege(roleName, `${databaseName}.${schemaName}`, [{
               privilege,
@@ -442,20 +474,32 @@ export default function CanvasPage() {
               objectName: `${databaseName}.${schemaName}`,
             }])
           }
-          return
+        } else {
+          // For general database connections (dropping on the database node itself),
+          // grant USAGE privilege by default
+          addGrantPrivilege(roleName, databaseName, [{
+            privilege: 'USAGE',
+            objectType: 'DATABASE',
+            objectName: databaseName,
+          }])
         }
 
-        // For general database connections (dropping on the database node itself),
-        // grant USAGE privilege by default - the most common database-level grant
-        addGrantPrivilege(roleName, databaseName, [{
-          privilege: 'USAGE',
-          objectType: 'DATABASE',
-          objectName: databaseName,
-        }])
+        // THEN: Expand the database with a delay to allow state updates to process
+        // This ensures pendingPrivilegeChanges is set on the node before expansion runs
+        // We use 200ms to ensure React has time to process the pendingChanges state update
+        // and the useLayoutEffect has run to set pendingPrivilegeChanges on the node
+        if (connectionId) {
+          setTimeout(async () => {
+            const token = await getToken()
+            if (token) {
+              expandDatabase(databaseName, connectionId, token)
+            }
+          }, 200)
+        }
         return
       }
     },
-    [setEdges, addGrantRole, addGrantPrivilege]
+    [setEdges, addGrantRole, addGrantPrivilege, connectionId, getToken, expandDatabase]
   )
 
   // Handle node clicks

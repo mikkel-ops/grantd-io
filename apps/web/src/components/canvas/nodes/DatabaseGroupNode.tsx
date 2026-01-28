@@ -1,4 +1,4 @@
-import { memo } from 'react'
+// import { memo } from 'react'  // Temporarily commented out for debugging
 import { Handle, Position, NodeProps } from '@xyflow/react'
 import { Database, Folder, Key } from 'lucide-react'
 
@@ -58,6 +58,9 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
   const isExpanded = nodeData.isExpanded && nodeData.schemas && nodeData.schemas.length > 0
   const databaseName = nodeData.label
 
+  // Debug: Log every render of this node
+  console.log(`DatabaseGroupNode RENDER - ${id} (${databaseName}) isExpanded:`, isExpanded, 'pendingPrivilegeChanges:', nodeData.pendingPrivilegeChanges)
+
   // Create a map for quick lookup of schema grants
   const schemaGrantsMap = new Map<string, string[]>()
   if (nodeData.highlightedSchemas) {
@@ -80,8 +83,13 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
 
   // Handle privilege click
   const handlePrivilegeClick = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', isCurrentlyGranted: boolean, schemaName?: string) => {
+    console.log('handlePrivilegeClick called:', { privilege, objectType, isCurrentlyGranted, schemaName })
+
     // Check if there's a pending change for this privilege
     const pendingChange = getPendingChange(privilege, objectType, schemaName)
+    console.log('pendingChange:', pendingChange)
+    console.log('nodeData.onRemovePendingChange:', !!nodeData.onRemovePendingChange)
+    console.log('nodeData.focusedRole:', nodeData.focusedRole)
 
     if (pendingChange && pendingChange.roleName && nodeData.onRemovePendingChange) {
       // If there's a pending change, clicking removes it
@@ -90,10 +98,14 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
         : databaseName
       const changeId = `toggle-${pendingChange.roleName}-${objectName}-${privilege}`
       const changeType = pendingChange.changeType === 'grant' ? 'grant_privilege' : 'revoke_privilege'
+      console.log('Removing pending change:', changeId, changeType)
       nodeData.onRemovePendingChange(changeId, changeType)
     } else if (nodeData.onPrivilegeToggle && nodeData.focusedRole) {
       // If no pending change and a role is focused, toggle the privilege
+      console.log('Toggling privilege')
       nodeData.onPrivilegeToggle(databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
+    } else {
+      console.log('No action taken - canToggle:', !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle, 'canRemove:', !!pendingChange && !!nodeData.onRemovePendingChange)
     }
   }
 
@@ -173,6 +185,11 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
               const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
               const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
               const canClick = canToggle || canRemovePending
+
+              // Debug: Log the click state for pending privileges
+              if (isPendingGrant || isPendingRevoke) {
+                console.log(`Privilege ${priv} - pendingChange:`, pendingChange, 'onRemovePendingChange:', !!nodeData.onRemovePendingChange, 'canRemovePending:', canRemovePending, 'canClick:', canClick)
+              }
 
               return (
                 <div key={priv} className="relative">
@@ -288,4 +305,6 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
   )
 }
 
-export default memo(DatabaseGroupNode)
+// Temporarily removing memo to debug re-render issues
+export default DatabaseGroupNode
+// export default memo(DatabaseGroupNode)

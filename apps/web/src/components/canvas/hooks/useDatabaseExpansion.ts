@@ -102,6 +102,10 @@ export function useDatabaseExpansion(
           .map(n => {
             // Update the target database node to show schemas
             if (n.id === dbNodeId) {
+              // Preserve pendingPrivilegeChanges from the current node data
+              // This is critical - without this, pending grants won't show as highlighted
+              const existingPendingChanges = (n.data as { pendingPrivilegeChanges?: unknown }).pendingPrivilegeChanges
+              console.log('expandDatabase - node data before expansion:', dbNodeId, 'pendingPrivilegeChanges:', existingPendingChanges)
               return {
                 ...n,
                 type: 'databaseGroup',
@@ -109,6 +113,9 @@ export function useDatabaseExpansion(
                   ...n.data,
                   isExpanded: true,
                   schemas: schemas,
+                  // Explicitly preserve pending changes - spreading n.data should do this,
+                  // but we're being explicit to avoid any potential override issues
+                  pendingPrivilegeChanges: existingPendingChanges,
                 },
               }
             }

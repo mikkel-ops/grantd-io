@@ -151,7 +151,13 @@ export function useDatabaseFocus(
   const clearFocus = useCallback(() => {
     setFocusedRole(null)
     setFocusedRoleGrants(new Map())
-    setEdges(baseEdgesRef.current)
+    // Remove only the focus-specific edges (role-db-edge-*), preserve everything else
+    // This ensures pending edges (privilege-edge-*, pending-*, revoke-*) are not lost
+    setEdges(currentEdges => {
+      // Remove role-db-edge-* edges (these are only for focus visualization)
+      const filteredEdges = currentEdges.filter(e => !e.id.startsWith('role-db-edge-'))
+      return filteredEdges
+    })
   }, [setEdges])
 
   return {
