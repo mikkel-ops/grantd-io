@@ -62,16 +62,28 @@ export default function CanvasPage() {
   const [addRoleType, setAddRoleType] = useState<'business' | 'functional'>('business')
   const [submitting, setSubmitting] = useState(false)
 
-  // Initialize canvas when data loads
+  // Track if canvas has been initialized to prevent re-initialization from wiping state
+  const hasInitialized = useRef(false)
+  const previousConnectionId = useRef<string | null>(null)
+
+  // Initialize canvas when data loads - ONLY ONCE per connection
   useEffect(() => {
-    if (initialNodes.length > 0) {
+    // Reset initialization if connection changes
+    if (connectionId !== previousConnectionId.current) {
+      hasInitialized.current = false
+      previousConnectionId.current = connectionId
+    }
+
+    // Only initialize if we have nodes and haven't initialized yet
+    if (initialNodes.length > 0 && !hasInitialized.current) {
       console.log('Initializing canvas with', initialNodes.length, 'nodes and', initialEdges.length, 'edges')
       setNodes(initialNodes)
       setEdges(initialEdges)
       setBaseNodes(initialNodes)
       setBaseEdges(initialEdges)
+      hasInitialized.current = true
     }
-  }, [initialNodes, initialEdges, setNodes, setEdges])
+  }, [initialNodes, initialEdges, setNodes, setEdges, connectionId])
 
   // Pending changes management
   const {
@@ -150,11 +162,6 @@ export default function CanvasPage() {
   // Using useLayoutEffect to ensure this runs synchronously before paint,
   // preventing race conditions with expandDatabase's setNodes call
   useLayoutEffect(() => {
-    // Debug: Log what pending privileges we have
-    console.log('useLayoutEffect - pendingPrivilegesByDb:', Array.from(pendingPrivilegesByDb.entries()))
-    console.log('useLayoutEffect - expandedDatabase:', expandedDatabase)
-    console.log('useLayoutEffect - focusedRole:', focusedRole)
-
     // Always update database nodes with pending changes, regardless of focus state
     setNodes(nds => nds.map(node => {
       // Check both type and id prefix to catch databases during type transitions
@@ -163,11 +170,6 @@ export default function CanvasPage() {
         const grantDetails = focusedRoleGrants.get(dbName)
         const pendingChangesForDb = pendingPrivilegesByDb.get(dbName)
         const hasFocus = focusedRoleGrants.size > 0 || focusedRole
-
-        // Debug: Log what we're setting on the node
-        if (pendingChangesForDb) {
-          console.log(`Setting pendingPrivilegeChanges on ${dbName}:`, pendingChangesForDb)
-        }
 
         return {
           ...node,
@@ -368,9 +370,10 @@ export default function CanvasPage() {
     [connectionId, getToken, focusOnRole]
   )
 
-  // Handle connection end - clear focus mode but keep database expanded if connection was made
+  // Handle connection end - keep focus mode if connection was made so user can add more grants
   const onConnectEnd: OnConnectEnd = useCallback(() => {
     const madeConnection = connectionMadeToDatabase.current
+    const connectingRole = connectingFromRole.current
     connectingFromRole.current = null
 
     // If no connection was made, clear everything immediately
@@ -385,18 +388,15 @@ export default function CanvasPage() {
       return
     }
 
-    // If a connection WAS made, give more time for the database to expand
-    // and keep it expanded to show the lit-up privilege
-    setTimeout(() => {
-      // Set flag to prevent the lineage useEffect from collapsing the database
-      skipCollapseOnFocusClear.current = true
-      // Clear the database focus (role grants highlighting) but preserve pending edges
-      clearFocus()
-      // Clear the lineage focus (node fading)
-      setFocusedNodeId(null)
-      // DON'T collapse the database - keep it expanded to show the pending privilege
-      connectionMadeToDatabase.current = null
-    }, 300)  // Longer delay to let expansion complete
+    // If a connection WAS made, KEEP the focus so user can click more privileges
+    // This mimics the behavior of clicking on a role - the role stays focused
+    // and the user can continue adding/removing grants
+    // Just reset the connection tracking ref
+    connectionMadeToDatabase.current = null
+
+    // The focusedNodeId and focusedRole are already set from onConnectStart
+    // so we don't clear them - this keeps the focus mode active
+    console.log('Connection made, keeping focus on role:', connectingRole)
   }, [expandedDatabase, collapseDatabase, clearFocus])
 
   // Handle node mouse enter - expand database when dragging from role

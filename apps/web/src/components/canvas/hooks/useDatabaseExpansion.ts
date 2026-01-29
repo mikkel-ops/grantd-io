@@ -84,7 +84,6 @@ export function useDatabaseExpansion(
 
         // Find the index of our target database
         const targetIndex = sortedDbNodes.findIndex(n => n.id === dbNodeId)
-        const expandedDbY = dbNode.position.y
 
         // Save original positions for ALL database nodes if not already saved
         // This preserves the initial layout positions
@@ -94,9 +93,6 @@ export function useDatabaseExpansion(
           }
         }
 
-        console.log('Expanding database:', databaseName, 'at Y:', expandedDbY, 'expansion height:', expansionHeight)
-        console.log('Target index:', targetIndex, 'of', sortedDbNodes.length, 'databases')
-
         const updatedNodes = nds
           .filter(n => !n.id.startsWith('schema-')) // Remove any standalone schema nodes
           .map(n => {
@@ -105,7 +101,6 @@ export function useDatabaseExpansion(
               // Preserve pendingPrivilegeChanges from the current node data
               // This is critical - without this, pending grants won't show as highlighted
               const existingPendingChanges = (n.data as { pendingPrivilegeChanges?: unknown }).pendingPrivilegeChanges
-              console.log('expandDatabase - node data before expansion:', dbNodeId, 'pendingPrivilegeChanges:', existingPendingChanges)
               return {
                 ...n,
                 type: 'databaseGroup',
@@ -120,34 +115,41 @@ export function useDatabaseExpansion(
               }
             }
 
-            // Collapse any other previously expanded database
-            if (n.type === 'databaseGroup' && n.id !== dbNodeId && (n.data as { isExpanded?: boolean }).isExpanded) {
-              return {
-                ...n,
-                type: 'databaseGroup',
-                data: {
-                  ...n.data,
-                  isExpanded: false,
-                  schemas: [],
-                },
-              }
-            }
-
-            // Push down database nodes that are below the expanded database
+            // Handle other database nodes (not the one being expanded)
             if (n.id.startsWith('db-') && n.id !== dbNodeId) {
-              // Check if this database is below the expanded one in the sorted order
               const nodeIndex = sortedDbNodes.findIndex(sn => sn.id === n.id)
-              if (nodeIndex > targetIndex) {
+              const shouldPushDown = nodeIndex > targetIndex
+              const wasExpanded = n.type === 'databaseGroup' && (n.data as { isExpanded?: boolean }).isExpanded
+
+              // Build the updated node - may need to collapse AND push down
+              let updatedNode = n
+
+              // Collapse if it was expanded
+              if (wasExpanded) {
+                updatedNode = {
+                  ...updatedNode,
+                  type: 'databaseGroup',
+                  data: {
+                    ...updatedNode.data,
+                    isExpanded: false,
+                    schemas: [],
+                  },
+                }
+              }
+
+              // Push down if below the expanded database
+              if (shouldPushDown) {
                 const originalY = originalYPositions.current.get(n.id) ?? n.position.y
-                console.log('Pushing down:', n.id, 'from', n.position.y, 'to', originalY + expansionHeight)
-                return {
-                  ...n,
+                updatedNode = {
+                  ...updatedNode,
                   position: {
-                    x: n.position.x,
+                    x: updatedNode.position.x,
                     y: originalY + expansionHeight,
                   },
                 }
               }
+
+              return updatedNode
             }
             return n
           })

@@ -58,9 +58,6 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
   const isExpanded = nodeData.isExpanded && nodeData.schemas && nodeData.schemas.length > 0
   const databaseName = nodeData.label
 
-  // Debug: Log every render of this node
-  console.log(`DatabaseGroupNode RENDER - ${id} (${databaseName}) isExpanded:`, isExpanded, 'pendingPrivilegeChanges:', nodeData.pendingPrivilegeChanges)
-
   // Create a map for quick lookup of schema grants
   const schemaGrantsMap = new Map<string, string[]>()
   if (nodeData.highlightedSchemas) {
@@ -68,8 +65,11 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
       schemaGrantsMap.set(sg.name, sg.privileges)
     }
   }
+  // Highlight the database if it has existing grants OR pending grants
+  const hasPendingGrants = nodeData.pendingPrivilegeChanges && nodeData.pendingPrivilegeChanges.some(p => p.changeType === 'grant')
   const hasHighlights = (nodeData.highlightedDbPrivileges && nodeData.highlightedDbPrivileges.length > 0) ||
-                        (nodeData.highlightedSchemas && nodeData.highlightedSchemas.length > 0)
+                        (nodeData.highlightedSchemas && nodeData.highlightedSchemas.length > 0) ||
+                        hasPendingGrants
 
   // Helper to check if a privilege has a pending change
   const getPendingChange = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string) => {
@@ -83,13 +83,8 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
 
   // Handle privilege click
   const handlePrivilegeClick = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', isCurrentlyGranted: boolean, schemaName?: string) => {
-    console.log('handlePrivilegeClick called:', { privilege, objectType, isCurrentlyGranted, schemaName })
-
     // Check if there's a pending change for this privilege
     const pendingChange = getPendingChange(privilege, objectType, schemaName)
-    console.log('pendingChange:', pendingChange)
-    console.log('nodeData.onRemovePendingChange:', !!nodeData.onRemovePendingChange)
-    console.log('nodeData.focusedRole:', nodeData.focusedRole)
 
     if (pendingChange && pendingChange.roleName && nodeData.onRemovePendingChange) {
       // If there's a pending change, clicking removes it
@@ -98,22 +93,24 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
         : databaseName
       const changeId = `toggle-${pendingChange.roleName}-${objectName}-${privilege}`
       const changeType = pendingChange.changeType === 'grant' ? 'grant_privilege' : 'revoke_privilege'
-      console.log('Removing pending change:', changeId, changeType)
       nodeData.onRemovePendingChange(changeId, changeType)
     } else if (nodeData.onPrivilegeToggle && nodeData.focusedRole) {
       // If no pending change and a role is focused, toggle the privilege
-      console.log('Toggling privilege')
       nodeData.onPrivilegeToggle(databaseName, privilege, objectType, schemaName, isCurrentlyGranted)
-    } else {
-      console.log('No action taken - canToggle:', !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle, 'canRemove:', !!pendingChange && !!nodeData.onRemovePendingChange)
     }
   }
+
+  // Use inline styles for border to ensure they're applied
+  const borderStyle = hasHighlights
+    ? { border: '2px solid #4ade80', boxShadow: '0 0 0 2px rgba(74, 222, 128, 0.3)' }  // green-400
+    : { border: '2px solid #22d3ee' }  // cyan-400
 
   return (
     <div
       className={`relative shadow-md rounded-lg bg-gradient-to-b from-cyan-50 to-white w-[250px] cursor-pointer transition-opacity duration-200 ${
         isExpanded ? 'pb-2' : ''
-      } ${hasHighlights ? 'border-2 border-green-400 ring-2 ring-green-200' : 'border-2 border-cyan-400'} ${nodeData.isFaded ? 'opacity-20' : ''}`}
+      } ${nodeData.isFaded ? 'opacity-20' : ''}`}
+      style={borderStyle}
     >
       {/* Main target handle - large invisible hit area for easier connections */}
       <Handle
@@ -185,11 +182,6 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
               const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
               const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
               const canClick = canToggle || canRemovePending
-
-              // Debug: Log the click state for pending privileges
-              if (isPendingGrant || isPendingRevoke) {
-                console.log(`Privilege ${priv} - pendingChange:`, pendingChange, 'onRemovePendingChange:', !!nodeData.onRemovePendingChange, 'canRemovePending:', canRemovePending, 'canClick:', canClick)
-              }
 
               return (
                 <div key={priv} className="relative">

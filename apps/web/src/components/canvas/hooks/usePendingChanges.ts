@@ -183,6 +183,9 @@ export function usePendingChanges(
   }, [nodes, setNodes, setEdges])
 
   const addGrantPrivilege = useCallback((roleName: string, databaseName: string, grants: PrivilegeGrant[]) => {
+    // Build the pending privilege changes that will be added
+    const newPendingChanges: { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke'; roleName: string }[] = []
+
     // For each grant, create a separate pending change with consistent ID format
     // This ensures they show up correctly in the UI and can be toggled off
     for (const grant of grants) {
@@ -213,7 +216,33 @@ export function usePendingChanges(
           },
         ]
       })
+
+      // Track the pending change for node update
+      newPendingChanges.push({
+        privilege: grant.privilege,
+        objectType: grant.objectType,
+        schemaName,
+        changeType: 'grant',
+        roleName,
+      })
     }
+
+    // IMMEDIATELY update the database node with pending changes
+    // This ensures the green border appears without waiting for useLayoutEffect
+    const dbNodeId = `db-${databaseName}`
+    setNodes(nds => nds.map(node => {
+      if (node.id === dbNodeId) {
+        const existingPendingChanges = (node.data as { pendingPrivilegeChanges?: typeof newPendingChanges }).pendingPrivilegeChanges || []
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            pendingPrivilegeChanges: [...existingPendingChanges, ...newPendingChanges],
+          },
+        }
+      }
+      return node
+    }))
 
     // Add visual edge from role to database (only if we added changes)
     const firstGrant = grants[0]
@@ -236,7 +265,7 @@ export function usePendingChanges(
         ]
       })
     }
-  }, [setEdges])
+  }, [setEdges, setNodes])
 
   const togglePrivilege = useCallback((
     roleName: string,
@@ -295,7 +324,47 @@ export function usePendingChanges(
         ]
       }
     })
-  }, []) // No dependencies needed - uses functional update
+
+    // IMMEDIATELY update the database node with the new pending change state
+    const dbNodeId = `db-${databaseName}`
+    setNodes(nds => nds.map(node => {
+      if (node.id === dbNodeId) {
+        const existingPendingChanges = (node.data as { pendingPrivilegeChanges?: { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke'; roleName?: string }[] }).pendingPrivilegeChanges || []
+
+        // Check if we're removing or adding
+        const existingIdx = existingPendingChanges.findIndex(
+          p => p.privilege === privilege && p.objectType === objectType && p.schemaName === schemaName
+        )
+
+        let newPendingChanges
+        if (existingIdx >= 0) {
+          // Remove the existing pending change
+          newPendingChanges = existingPendingChanges.filter((_, i) => i !== existingIdx)
+        } else {
+          // Add new pending change
+          newPendingChanges = [
+            ...existingPendingChanges,
+            {
+              privilege,
+              objectType,
+              schemaName,
+              changeType: isCurrentlyGranted ? 'revoke' as const : 'grant' as const,
+              roleName,
+            },
+          ]
+        }
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            pendingPrivilegeChanges: newPendingChanges,
+          },
+        }
+      }
+      return node
+    }))
+  }, [setNodes])
 
   const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
@@ -345,8 +414,41 @@ export function usePendingChanges(
         })
       })
       setEdges(eds => eds.filter(e => e.target !== `role-${changeId}` && e.source !== `role-${changeId}`))
-    } else if (changeType === 'grant_privilege') {
+    } else if (changeType === 'grant_privilege' || changeType === 'revoke_privilege') {
+      // Remove the edge
       setEdges(eds => eds.filter(e => e.id !== `privilege-edge-${changeId}`))
+
+      // Parse changeId to extract privilege info: toggle-{roleName}-{objectName}-{privilege}
+      const parts = changeId.split('-')
+      if (parts.length >= 4 && parts[0] === 'toggle') {
+        // Extract database name - objectName could be "DB" or "DB.SCHEMA"
+        const privilege = parts[parts.length - 1]
+        const objectName = parts.slice(2, -1).join('-')
+        const databaseName = objectName.includes('.') ? objectName.split('.')[0] : objectName
+        const schemaName = objectName.includes('.') ? objectName.split('.')[1] : undefined
+
+        // Update the database node to remove this pending change
+        const dbNodeId = `db-${databaseName}`
+        setNodes(nds => nds.map(node => {
+          if (node.id === dbNodeId) {
+            const existingPendingChanges = (node.data as { pendingPrivilegeChanges?: { privilege: string; objectType: 'DATABASE' | 'SCHEMA'; schemaName?: string; changeType: 'grant' | 'revoke'; roleName?: string }[] }).pendingPrivilegeChanges || []
+
+            // Remove the matching pending change
+            const newPendingChanges = existingPendingChanges.filter(
+              p => !(p.privilege === privilege && p.schemaName === schemaName)
+            )
+
+            return {
+              ...node,
+              data: {
+                ...node.data,
+                pendingPrivilegeChanges: newPendingChanges.length > 0 ? newPendingChanges : undefined,
+              },
+            }
+          }
+          return node
+        }))
+      }
     }
   }, [setEdges, setNodes])
 
