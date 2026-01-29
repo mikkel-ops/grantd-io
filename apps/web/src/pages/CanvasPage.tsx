@@ -56,6 +56,9 @@ export default function CanvasPage() {
   const [baseNodes, setBaseNodes] = useState<Node[]>([])
   const [baseEdges, setBaseEdges] = useState<Edge[]>([])
 
+  // Connection target highlight - which database is being hovered while dragging from a role
+  const [connectionTargetDb, setConnectionTargetDb] = useState<string | null>(null)
+
   // Modal state
   const [showAddUserModal, setShowAddUserModal] = useState(false)
   const [showAddRoleModal, setShowAddRoleModal] = useState(false)
@@ -182,12 +185,14 @@ export default function CanvasPage() {
             pendingPrivilegeChanges: pendingChangesForDb,
             onPrivilegeToggle: hasFocus ? handlePrivilegeToggle : undefined,
             onRemovePendingChange: handleRemovePendingChange,
+            // Highlight as connection target when dragging from role
+            isConnectionTarget: connectionTargetDb === dbName,
           },
         }
       }
       return node
     }))
-  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb, expandedDatabase])
+  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb, expandedDatabase, connectionTargetDb])
 
   // Lineage focus state - track which node is focused
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)
@@ -376,6 +381,9 @@ export default function CanvasPage() {
     const connectingRole = connectingFromRole.current
     connectingFromRole.current = null
 
+    // Clear the connection target highlight
+    setConnectionTargetDb(null)
+
     // If no connection was made, clear everything immediately
     if (!madeConnection) {
       setTimeout(() => {
@@ -399,22 +407,41 @@ export default function CanvasPage() {
     console.log('Connection made, keeping focus on role:', connectingRole)
   }, [expandedDatabase, collapseDatabase, clearFocus])
 
-  // Handle node mouse enter - expand database when dragging from role
+  // Handle node mouse enter - expand database and highlight when dragging from role
   const onNodeMouseEnter = useCallback(
     async (_event: React.MouseEvent, node: Node) => {
-      // Only expand if we're dragging from a role
+      // Only process if we're dragging from a role
       if (!connectingFromRole.current) return
       // Handle both database and databaseGroup node types
       if (!node.id.startsWith('db-')) return
-      if (!connectionId) return
 
       const databaseName = node.id.replace('db-', '')
-      const token = await getToken()
-      if (token) {
-        expandDatabase(databaseName, connectionId, token)
+
+      // Set this database as the connection target (for green highlight)
+      setConnectionTargetDb(databaseName)
+
+      // Expand the database if we have a connection
+      if (connectionId) {
+        const token = await getToken()
+        if (token) {
+          expandDatabase(databaseName, connectionId, token)
+        }
       }
     },
     [connectionId, getToken, expandDatabase]
+  )
+
+  // Handle node mouse leave - clear connection target highlight
+  const onNodeMouseLeave = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      // Only clear if we're dragging from a role and leaving a database
+      if (!connectingFromRole.current) return
+      if (!node.id.startsWith('db-')) return
+
+      // Clear the connection target highlight
+      setConnectionTargetDb(null)
+    },
+    []
   )
 
   // Handle new connections (user -> role grants, role -> database/schema privileges)
@@ -754,6 +781,7 @@ export default function CanvasPage() {
             onConnectEnd={onConnectEnd}
             onNodeClick={onNodeClick}
             onNodeMouseEnter={onNodeMouseEnter}
+            onNodeMouseLeave={onNodeMouseLeave}
             onEdgeClick={onEdgeClick}
             onPaneClick={onPaneClick}
             nodeTypes={nodeTypes}

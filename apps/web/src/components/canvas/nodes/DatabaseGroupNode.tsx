@@ -38,6 +38,8 @@ export interface DatabaseGroupNodeData {
   focusedRole?: string
   // Pending privilege changes for this database
   pendingPrivilegeChanges?: PendingPrivilegeChange[]
+  // Connection target highlight - when dragging from a role and hovering over this database
+  isConnectionTarget?: boolean
   // Callback for privilege toggle (when role is focused)
   onPrivilegeToggle?: (
     databaseName: string,
@@ -65,11 +67,12 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
       schemaGrantsMap.set(sg.name, sg.privileges)
     }
   }
-  // Highlight the database if it has existing grants OR pending grants
+  // Highlight the database if it has existing grants OR pending grants OR is a connection target
   const hasPendingGrants = nodeData.pendingPrivilegeChanges && nodeData.pendingPrivilegeChanges.some(p => p.changeType === 'grant')
   const hasHighlights = (nodeData.highlightedDbPrivileges && nodeData.highlightedDbPrivileges.length > 0) ||
                         (nodeData.highlightedSchemas && nodeData.highlightedSchemas.length > 0) ||
-                        hasPendingGrants
+                        hasPendingGrants ||
+                        nodeData.isConnectionTarget
 
   // Helper to check if a privilege has a pending change
   const getPendingChange = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string) => {
