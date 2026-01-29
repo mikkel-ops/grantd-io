@@ -313,13 +313,18 @@ export default function CanvasPage() {
       }
 
       // Update nodes with fading
-      setNodes(nds => nds.map(node => ({
-        ...node,
-        data: {
-          ...node.data,
-          isFaded: !connectedNodes.has(node.id),
-        },
-      })))
+      // Note: connectionTargetDb is accessed from the outer scope to prevent fading the drop target
+      setNodes(nds => nds.map(node => {
+        // Never fade the connection target database - it should always be visible when dragging
+        const isConnectionTarget = node.id === `db-${connectionTargetDb}`
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            isFaded: isConnectionTarget ? false : !connectedNodes.has(node.id),
+          },
+        }
+      }))
 
       // Store databases to expand (will be done after state updates complete)
       databasesToExpand = connectedDatabases
@@ -345,7 +350,7 @@ export default function CanvasPage() {
         }
       }, 50)
     }
-  }, [focusedNodeId, focusedRole, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase])
+  }, [focusedNodeId, focusedRole, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase, connectionTargetDb])
 
   // Track connection drag state
   const connectingFromRole = useRef<string | null>(null)
