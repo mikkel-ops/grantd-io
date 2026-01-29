@@ -96,6 +96,7 @@ export default function CanvasPage() {
     addCreateUser,
     addCreateRole,
     addGrantPrivilege,
+    addInheritRole,
     togglePrivilege,
     removePendingChange,
     clearAllChanges,
@@ -530,8 +531,21 @@ export default function CanvasPage() {
         }
         return
       }
+
+      // Role to Role connection (inheritance)
+      // Parent role (source) grants its privileges to child role (target)
+      if (params.source?.startsWith('role-') && params.target?.startsWith('role-')) {
+        const parentRoleName = params.source.replace('role-', '')
+        const childRoleName = params.target.replace('role-', '')
+
+        // Don't allow self-referential connections
+        if (parentRoleName === childRoleName) return
+
+        addInheritRole(parentRoleName, childRoleName)
+        return
+      }
     },
-    [setEdges, addGrantRole, addGrantPrivilege, connectionId, getToken, expandDatabase]
+    [setEdges, addGrantRole, addGrantPrivilege, addInheritRole, connectionId, getToken, expandDatabase]
   )
 
   // Handle node clicks
@@ -706,6 +720,17 @@ export default function CanvasPage() {
               object_name: objectName,
             },
           }]
+        } else if (change.type === 'inherit_role' && change.parentRoleName && change.childRoleName) {
+          // Role inheritance: grant parent role to child role
+          return [{
+            change_type: 'grant',
+            object_type: 'role_inheritance',
+            object_name: `${change.parentRoleName} -> ${change.childRoleName}`,
+            details: {
+              parent_role: change.parentRoleName,
+              child_role: change.childRoleName,
+            },
+          }]
         } else {
           return [{
             change_type: change.type === 'grant_role' ? 'grant' : 'revoke',
@@ -837,6 +862,7 @@ function buildChangesetTitle(changes: PendingChange[]): string {
   const createRoleCount = changes.filter(c => c.type === 'create_role').length
   const grantCount = changes.filter(c => c.type === 'grant_role').length
   const revokeCount = changes.filter(c => c.type === 'revoke_role').length
+  const inheritRoleCount = changes.filter(c => c.type === 'inherit_role').length
   const grantPrivilegeCount = changes.filter(c => c.type === 'grant_privilege').reduce(
     (sum, c) => sum + (c.privilegeGrants?.length || 1),
     0
@@ -848,6 +874,7 @@ function buildChangesetTitle(changes: PendingChange[]): string {
   if (createRoleCount > 0) parts.push(`${createRoleCount} new role${createRoleCount > 1 ? 's' : ''}`)
   if (grantCount > 0) parts.push(`${grantCount} role grant${grantCount > 1 ? 's' : ''}`)
   if (revokeCount > 0) parts.push(`${revokeCount} role revoke${revokeCount > 1 ? 's' : ''}`)
+  if (inheritRoleCount > 0) parts.push(`${inheritRoleCount} role inheritance${inheritRoleCount > 1 ? 's' : ''}`)
   if (grantPrivilegeCount > 0) parts.push(`${grantPrivilegeCount} privilege grant${grantPrivilegeCount > 1 ? 's' : ''}`)
   if (revokePrivilegeCount > 0) parts.push(`${revokePrivilegeCount} privilege revoke${revokePrivilegeCount > 1 ? 's' : ''}`)
 

@@ -6,9 +6,11 @@ import { LAYOUT } from './useCanvasData'
 
 export interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege'
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege' | 'inherit_role'
   userName?: string
   roleName?: string
+  parentRoleName?: string  // For inherit_role: the role being inherited from
+  childRoleName?: string   // For inherit_role: the role that inherits
   userDetails?: UserDetails
   privilegeGrants?: PrivilegeGrant[]
   databaseName?: string
@@ -24,6 +26,7 @@ interface UsePendingChangesResult {
   addCreateUser: (details: UserDetails) => void
   addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType?: 'business' | 'functional') => void
   addGrantPrivilege: (roleName: string, databaseName: string, grants: PrivilegeGrant[]) => void
+  addInheritRole: (parentRoleName: string, childRoleName: string) => void
   togglePrivilege: (roleName: string, databaseName: string, privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string, isCurrentlyGranted?: boolean) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
@@ -91,21 +94,8 @@ export function usePendingChanges(
       data: { label: details.userName, email: details.email, isNew: true },
     }
 
-    setNodes(nds => {
-      const filtered = nds.filter(n => n.id !== 'add-user-button')
-      return [
-        ...filtered,
-        newUserNode,
-        {
-          id: 'add-user-button',
-          type: 'addButton',
-          position: { x: LAYOUT.USER_X, y: LAYOUT.START_Y + (userCount + 1) * LAYOUT.ROW_HEIGHT },
-          data: { label: 'Add User', type: 'user', onClick: () => {} },
-          selectable: false,
-          draggable: false,
-        },
-      ]
-    })
+    // Button stays at top, just add the new user node
+    setNodes(nds => [...nds, newUserNode])
 
     setPendingChanges(prev => [
       ...prev,
@@ -121,9 +111,6 @@ export function usePendingChanges(
   const addCreateRole = useCallback((roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType: 'business' | 'functional' = 'business') => {
     const isFunctional = roleType === 'functional'
     const xPosition = isFunctional ? LAYOUT.FUNCTIONAL_ROLE_X : LAYOUT.BUSINESS_ROLE_X
-    const buttonId = isFunctional ? 'add-functional-role-button' : 'add-business-role-button'
-    const buttonLabel = isFunctional ? 'Add Functional Role' : 'Add Business Role'
-    const buttonType = isFunctional ? 'functional-role' : 'role'
 
     const roleCount = nodes.filter(n => n.type === 'role' && n.position.x === xPosition).length
     const newRoleNode: Node = {
@@ -133,21 +120,8 @@ export function usePendingChanges(
       data: { label: roleName, type: roleType, isSystem: false, isNew: true },
     }
 
-    setNodes(nds => {
-      const filtered = nds.filter(n => n.id !== buttonId)
-      return [
-        ...filtered,
-        newRoleNode,
-        {
-          id: buttonId,
-          type: 'addButton',
-          position: { x: xPosition, y: LAYOUT.START_Y + (roleCount + 1) * LAYOUT.ROW_HEIGHT },
-          data: { label: buttonLabel, type: buttonType, onClick: () => {} },
-          selectable: false,
-          draggable: false,
-        },
-      ]
-    })
+    // Button stays at top, just add the new role node
+    setNodes(nds => [...nds, newRoleNode])
 
     setPendingChanges(prev => [
       ...prev,
@@ -181,6 +155,46 @@ export function usePendingChanges(
       setEdges(eds => [...eds, ...newEdges])
     }
   }, [nodes, setNodes, setEdges])
+
+  // Add role inheritance (parent role grants to child role)
+  const addInheritRole = useCallback((parentRoleName: string, childRoleName: string) => {
+    const changeId = `inherit-${parentRoleName}-${childRoleName}`
+
+    // Check if already pending
+    setPendingChanges(prev => {
+      if (prev.some(c => c.id === changeId)) {
+        return prev
+      }
+      return [
+        ...prev,
+        {
+          id: changeId,
+          type: 'inherit_role' as const,
+          parentRoleName,
+          childRoleName,
+        },
+      ]
+    })
+
+    // Add visual edge from parent role to child role
+    const edgeId = `pending-inherit-${parentRoleName}-${childRoleName}`
+    setEdges(eds => {
+      // Don't add duplicate edges
+      if (eds.some(e => e.id === edgeId)) {
+        return eds
+      }
+      return [
+        ...eds,
+        {
+          id: edgeId,
+          source: `role-${parentRoleName}`,
+          target: `role-${childRoleName}`,
+          animated: true,
+          style: { stroke: '#22c55e', strokeDasharray: '5,5', strokeWidth: 2 },
+        },
+      ]
+    })
+  }, [setEdges])
 
   const addGrantPrivilege = useCallback((roleName: string, databaseName: string, grants: PrivilegeGrant[]) => {
     // Build the pending privilege changes that will be added
@@ -384,35 +398,12 @@ export function usePendingChanges(
         return e
       }))
     } else if (changeType === 'create_user') {
-      setNodes(nds => {
-        const filtered = nds.filter(n => n.id !== `user-${changeId}`)
-        const userCount = filtered.filter(n => n.type === 'user').length
-        return filtered.map(n => {
-          if (n.id === 'add-user-button') {
-            return { ...n, position: { x: LAYOUT.USER_X, y: LAYOUT.START_Y + userCount * LAYOUT.ROW_HEIGHT } }
-          }
-          return n
-        })
-      })
+      // Remove the user node - button stays at top
+      setNodes(nds => nds.filter(n => n.id !== `user-${changeId}`))
       setEdges(eds => eds.filter(e => e.source !== `user-${changeId}`))
     } else if (changeType === 'create_role') {
-      setNodes(nds => {
-        const roleNode = nds.find(n => n.id === `role-${changeId}`)
-        const filtered = nds.filter(n => n.id !== `role-${changeId}`)
-
-        // Determine if it was a functional or business role based on x position
-        const isFunctional = roleNode && roleNode.position.x === LAYOUT.FUNCTIONAL_ROLE_X
-        const xPosition = isFunctional ? LAYOUT.FUNCTIONAL_ROLE_X : LAYOUT.BUSINESS_ROLE_X
-        const buttonId = isFunctional ? 'add-functional-role-button' : 'add-business-role-button'
-
-        const roleCount = filtered.filter(n => n.type === 'role' && n.position.x === xPosition).length
-        return filtered.map(n => {
-          if (n.id === buttonId) {
-            return { ...n, position: { x: xPosition, y: LAYOUT.START_Y + roleCount * LAYOUT.ROW_HEIGHT } }
-          }
-          return n
-        })
-      })
+      // Remove the role node - button stays at top
+      setNodes(nds => nds.filter(n => n.id !== `role-${changeId}`))
       setEdges(eds => eds.filter(e => e.target !== `role-${changeId}` && e.source !== `role-${changeId}`))
     } else if (changeType === 'grant_privilege' || changeType === 'revoke_privilege') {
       // Remove the edge
@@ -449,12 +440,26 @@ export function usePendingChanges(
           return node
         }))
       }
+    } else if (changeType === 'inherit_role') {
+      // Remove the inheritance edge
+      // changeId format: inherit-{parentRoleName}-{childRoleName}
+      const parts = changeId.split('-')
+      if (parts.length >= 3 && parts[0] === 'inherit') {
+        const parentRoleName = parts[1]
+        const childRoleName = parts.slice(2).join('-')
+        setEdges(eds => eds.filter(e => e.id !== `pending-inherit-${parentRoleName}-${childRoleName}`))
+      }
     }
   }, [setEdges, setNodes])
 
   const clearAllChanges = useCallback(() => {
     setEdges(eds => {
-      const filtered = eds.filter(e => !e.id.startsWith('pending-') && !e.id.startsWith('privilege-edge-'))
+      // Filter out pending edges, privilege edges, and inherit edges
+      const filtered = eds.filter(e =>
+        !e.id.startsWith('pending-') &&
+        !e.id.startsWith('privilege-edge-') &&
+        !e.id.startsWith('pending-inherit-')
+      )
       return filtered.map(e => {
         if (e.id.startsWith('revoke-')) {
           return {
@@ -492,6 +497,7 @@ export function usePendingChanges(
     addCreateUser,
     addCreateRole,
     addGrantPrivilege,
+    addInheritRole,
     togglePrivilege,
     removePendingChange,
     clearAllChanges,

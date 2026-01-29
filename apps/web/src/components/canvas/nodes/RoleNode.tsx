@@ -43,7 +43,7 @@ function RoleNode({ data }: NodeProps) {
 
   return (
     <div className={`relative px-4 py-3 shadow-md rounded-lg bg-white border-2 ${styles.border} w-[250px] cursor-pointer transition-opacity duration-200 ${
-      nodeData.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4 animate-pulse' : ''
+      nodeData.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4' : ''
     } ${nodeData.isFaded ? 'opacity-20' : ''}`}>
       {/* Target handle - large invisible hit area, visual dot is separate */}
       <Handle

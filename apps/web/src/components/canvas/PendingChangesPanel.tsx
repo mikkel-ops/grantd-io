@@ -88,6 +88,7 @@ function PendingChangeItem({
   const isCreateUser = change.type === 'create_user'
   const isCreateRole = change.type === 'create_role'
   const isGrantPrivilege = change.type === 'grant_privilege'
+  const isInheritRole = change.type === 'inherit_role'
   const isPrivilegeChange = isGrantPrivilege || isRevokePrivilege
   const isCreate = isCreateUser || isCreateRole
 
@@ -138,6 +139,19 @@ function PendingChangeItem({
             </div>
             <div className="text-xs text-muted-foreground">
               {isRevoke ? 'Revoke' : 'Grant'} <span className="font-medium">{change.privilege || change.privilegeGrants?.map(g => g.privilege).join(', ')}</span> on {objectName}
+            </div>
+          </>
+        ) : isInheritRole ? (
+          <>
+            <div className="flex items-center gap-1">
+              <Shield className="h-3 w-3 text-purple-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.childRoleName}</span>
+              <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <Shield className="h-3 w-3 text-purple-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.parentRoleName}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Role inheritance
             </div>
           </>
         ) : (

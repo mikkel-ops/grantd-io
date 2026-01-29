@@ -183,7 +183,8 @@ const LAYOUT = {
   BUSINESS_ROLE_X: 350,
   FUNCTIONAL_ROLE_X: 650,
   DATABASE_X: 950,
-  START_Y: 50,
+  BUTTON_Y: 50,        // Y position for "Add" buttons (at top)
+  START_Y: 130,        // Y position for first data row (below buttons)
   ROW_HEIGHT: 80,
 } as const
 
@@ -344,11 +345,11 @@ function buildCanvasLayout(
     }
   }
 
-  // Add button nodes
+  // Add button nodes - positioned at top of each column
   const addUserNode: Node = {
     id: 'add-user-button',
     type: 'addButton',
-    position: { x: LAYOUT.USER_X, y: LAYOUT.START_Y + users.length * LAYOUT.ROW_HEIGHT },
+    position: { x: LAYOUT.USER_X, y: LAYOUT.BUTTON_Y },
     data: { label: 'Add User', type: 'user', onClick: () => {} },
     selectable: false,
     draggable: false,
@@ -357,7 +358,7 @@ function buildCanvasLayout(
   const addBusinessRoleNode: Node = {
     id: 'add-business-role-button',
     type: 'addButton',
-    position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.START_Y + businessRoles.length * LAYOUT.ROW_HEIGHT },
+    position: { x: LAYOUT.BUSINESS_ROLE_X, y: LAYOUT.BUTTON_Y },
     data: { label: 'Add Business Role', type: 'role', onClick: () => {} },
     selectable: false,
     draggable: false,
@@ -366,7 +367,7 @@ function buildCanvasLayout(
   const addFunctionalRoleNode: Node = {
     id: 'add-functional-role-button',
     type: 'addButton',
-    position: { x: LAYOUT.FUNCTIONAL_ROLE_X, y: LAYOUT.START_Y + functionalRoles.length * LAYOUT.ROW_HEIGHT },
+    position: { x: LAYOUT.FUNCTIONAL_ROLE_X, y: LAYOUT.BUTTON_Y },
     data: { label: 'Add Functional Role', type: 'functional-role', onClick: () => {} },
     selectable: false,
     draggable: false,
