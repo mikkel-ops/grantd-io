@@ -151,21 +151,17 @@ export function useDatabaseFocus(
 
       console.log('Created edges:', dbEdges.length)
 
-      // Update edges: keep ALL base edges, pending edges, and add focus-specific edges
-      // The focus edges may duplicate some base edges (same IDs), which is fine
+      // Update edges: preserve current edge styling (from lineage effect), just add/update dbEdges
       setEdges(currentEdges => {
-        // Keep pending edges (these should persist across focus changes)
-        const pendingEdges = currentEdges.filter(e =>
-          e.id.startsWith('pending-') ||
-          e.id.startsWith('privilege-edge-') ||
-          e.id.startsWith('revoke-') ||
-          e.id.startsWith('pending-inherit-') ||
-          e.id.startsWith('role-edge-new-')  // Edges for newly created roles
-        )
+        // Create a set of dbEdge IDs we're adding (to avoid duplicates)
+        const dbEdgeIds = new Set(dbEdges.map(e => e.id))
 
-        // Keep ALL base edges (including initial role-db-edge-* edges)
-        // The dbEdges for the focused role may have the same IDs, which will update them
-        return [...baseEdgesRef.current, ...pendingEdges, ...dbEdges]
+        // Keep all current edges EXCEPT ones that will be replaced by new dbEdges
+        // This preserves the opacity styling applied by the lineage effect
+        const filteredEdges = currentEdges.filter(e => !dbEdgeIds.has(e.id))
+
+        // Add the new dbEdges for the focused role
+        return [...filteredEdges, ...dbEdges]
       })
     } catch (error) {
       console.error('Failed to fetch role grants:', error)

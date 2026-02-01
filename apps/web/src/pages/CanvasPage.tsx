@@ -357,7 +357,7 @@ export default function CanvasPage() {
         }
       }, 50)
     }
-  }, [focusedNodeId, focusedRole, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase, connectionTargetDb])
+  }, [focusedNodeId, focusedRole, focusedRoleGrants, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase, connectionTargetDb])
 
   // Track connection drag state
   const connectingFromRole = useRef<string | null>(null)
