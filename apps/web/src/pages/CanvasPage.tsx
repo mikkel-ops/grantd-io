@@ -332,13 +332,18 @@ export default function CanvasPage() {
       databasesToExpand = connectedDatabases
 
       // Return edges with faded styling (use 0 to completely hide non-lineage edges)
-      return currentEdges.map(edge => ({
-        ...edge,
-        style: {
-          ...edge.style,
-          opacity: connectedEdges.has(edge.id) ? 1 : 0,
-        },
-      }))
+      // Also disable pointer events on hidden edges so cursor doesn't change
+      return currentEdges.map(edge => {
+        const isVisible = connectedEdges.has(edge.id)
+        return {
+          ...edge,
+          style: {
+            ...edge.style,
+            opacity: isVisible ? 1 : 0,
+            pointerEvents: isVisible ? 'auto' : 'none',
+          },
+        }
+      })
     })
 
     // Expand the first connected database after a short delay to let state updates settle
@@ -369,6 +374,12 @@ export default function CanvasPage() {
         connectingFromRole.current = roleName
         connectionMadeToDatabase.current = null
 
+        // Collapse any previously expanded database so it can be re-expanded
+        // This is important when switching focus between roles
+        if (expandedDatabase) {
+          collapseDatabase()
+        }
+
         // Activate focus mode for this role - shows lineage and database connections
         setFocusedNodeId(nodeId)
         if (connectionId) {
@@ -379,7 +390,7 @@ export default function CanvasPage() {
         }
       }
     },
-    [connectionId, getToken, focusOnRole]
+    [connectionId, getToken, focusOnRole, expandedDatabase, collapseDatabase]
   )
 
   // Handle connection end - keep focus mode if connection was made so user can add more grants
@@ -565,6 +576,10 @@ export default function CanvasPage() {
         // Focus on user to show lineage
         setFocusedNode(node.id)
       } else if (node.type === 'role' && connectionId) {
+        // Collapse any previously expanded database when switching focus to a new role
+        if (expandedDatabase) {
+          collapseDatabase()
+        }
         // Focus on role to show lineage and database access
         setFocusedNode(node.id)
         console.log('Role clicked, fetching grants for:', node.data.label)
@@ -582,7 +597,7 @@ export default function CanvasPage() {
         }
       }
     },
-    [focusOnRole, toggleDatabase, connectionId, getToken, setFocusedNode]
+    [focusOnRole, toggleDatabase, connectionId, getToken, setFocusedNode, expandedDatabase, collapseDatabase]
   )
 
   // Handle pane click (empty canvas space) - clear focus
@@ -598,6 +613,11 @@ export default function CanvasPage() {
   // Handle edge clicks (for revokes)
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
+      // Skip edges that are faded/invisible (opacity 0) during focus mode
+      if (edge.style?.opacity === 0) {
+        return
+      }
+
       // Skip pending/role-to-role inheritance edges
       if (edge.id.startsWith('pending-') || edge.id.startsWith('role-edge-')) {
         return

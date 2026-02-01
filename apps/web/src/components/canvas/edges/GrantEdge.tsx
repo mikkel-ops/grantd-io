@@ -27,6 +27,7 @@ function GrantEdge({
 
   // Get opacity from style (set by lineage focus)
   const opacity = (style?.opacity as number) ?? 1
+  const isHidden = opacity === 0
 
   const [edgePath, labelX, labelY] = getBezierPath({
     sourceX,
@@ -49,20 +50,28 @@ function GrantEdge({
 
   return (
     <>
-      {/* Invisible interaction path for easier clicking */}
+      {/* Invisible interaction path for easier clicking - disabled when edge is hidden */}
       <path
         d={edgePath}
         fill="none"
         stroke="transparent"
         strokeWidth={20}
         className="react-flow__edge-interaction"
+        style={{
+          pointerEvents: isHidden ? 'none' : 'auto',
+          cursor: isHidden ? 'default' : 'pointer',
+        }}
       />
       {/* Visible edge path */}
       <path
         id={id}
         className="react-flow__edge-path"
         d={edgePath}
-        style={style}
+        style={{
+          ...style,
+          pointerEvents: isHidden ? 'none' : 'auto',
+          cursor: isHidden ? 'default' : 'pointer',
+        }}
         markerEnd={markerEnd}
       />
       {labelText && opacity > 0 && (
