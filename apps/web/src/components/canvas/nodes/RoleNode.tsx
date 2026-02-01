@@ -45,14 +45,12 @@ function RoleNode({ data }: NodeProps) {
     <div className={`relative px-4 py-3 shadow-md rounded-lg bg-white border-2 ${styles.border} w-[250px] cursor-pointer transition-opacity duration-200 ${
       nodeData.isNew ? 'outline outline-2 outline-dashed outline-green-500 outline-offset-4' : ''
     } ${nodeData.isFaded ? 'opacity-20' : ''}`}>
-      {/* Target handle - large invisible hit area, visual dot is separate */}
+      {/* Target handle - positioned at node edge for accurate edge connection */}
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-10 !h-full !bg-transparent !border-0 !rounded-none !transform-none !top-0 !-left-5"
+        className="!w-3 !h-3 !rounded-full !border-0 !bg-gray-500"
       />
-      {/* Visual dot for target (pointer-events-none so clicks go to Handle) */}
-      <div className="absolute left-0 top-1/2 -translate-x-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-gray-500 pointer-events-none" />
       <Handle type="source" position={Position.Right} className="w-3 h-3 !bg-gray-500" />
       <div className="flex items-center gap-2">
         <div className={`rounded-full ${styles.bg} p-1.5 flex-shrink-0`}>

@@ -7,6 +7,17 @@ import { api } from '@/lib/api'
 export interface ApiConnection {
   id: string
   name: string
+  connection_config: {
+    username?: string
+    account?: string
+    warehouse?: string
+  }
+}
+
+// Helper to check if a user is the Grantd service user
+const isServiceUser = (userName: string, serviceUser: string | null): boolean => {
+  if (!serviceUser) return false
+  return userName.toUpperCase() === serviceUser.toUpperCase()
 }
 
 export interface PlatformUser {
@@ -124,8 +135,12 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
           return
         }
 
-        const connId = connections[0]!.id
+        const connection = connections[0]!
+        const connId = connection.id
         setConnectionId(connId)
+
+        // Get the service user from connection config
+        const serviceUser = connection.connection_config?.username || null
 
         // Load all data in parallel (including databases and grants now)
         const [usersData, rolesData, assignmentsData, databasesData, grantsData] = await Promise.all([
@@ -149,7 +164,8 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
           assignmentsData || [],
           databasesData || [],
           grantsData || [],
-          showSystemObjects
+          showSystemObjects,
+          serviceUser
         )
 
         setInitialNodes(nodes)
@@ -180,11 +196,11 @@ export function useCanvasData(showSystemObjects: boolean = false): UseCanvasData
 // Layout constants
 const LAYOUT = {
   USER_X: 50,
-  BUSINESS_ROLE_X: 350,
-  FUNCTIONAL_ROLE_X: 650,
-  DATABASE_X: 950,
-  BUTTON_Y: 50,        // Y position for "Add" buttons (at top)
-  START_Y: 130,        // Y position for first data row (below buttons)
+  BUSINESS_ROLE_X: 400,      // Increased from 350 for more spacing
+  FUNCTIONAL_ROLE_X: 800,    // Increased from 650 for label space
+  DATABASE_X: 1200,          // Increased from 950 for label space
+  BUTTON_Y: 50,              // Y position for "Add" buttons (at top)
+  START_Y: 130,              // Y position for first data row (below buttons)
   ROW_HEIGHT: 80,
 } as const
 
@@ -194,10 +210,14 @@ function buildCanvasLayout(
   assignments: RoleAssignment[],
   databases: PlatformDatabase[],
   grants: PlatformGrant[],
-  showSystemObjects: boolean
+  showSystemObjects: boolean,
+  serviceUser: string | null = null
 ): { nodes: Node[]; edges: Edge[] } {
   // Filter out system roles unless showSystemObjects is true
   const filteredRoles = showSystemObjects ? roles : roles.filter(r => !r.is_system)
+
+  // Filter out the service user (the user account Grantd uses to connect)
+  const filteredUsers = users.filter(u => !isServiceUser(u.name, serviceUser))
 
   // Separate business and functional roles
   const businessRoles = filteredRoles.filter(
@@ -206,7 +226,7 @@ function buildCanvasLayout(
   const functionalRoles = filteredRoles.filter(r => r.role_type === 'functional')
 
   // Create user nodes
-  const userNodes: Node[] = users.map((user, index) => ({
+  const userNodes: Node[] = filteredUsers.map((user, index) => ({
     id: `user-${user.name}`,
     type: 'user',
     position: { x: LAYOUT.USER_X, y: LAYOUT.START_Y + index * LAYOUT.ROW_HEIGHT },
@@ -312,11 +332,36 @@ function buildCanvasLayout(
   }
 
   // Create edges from roles to databases
-  const roleToDatabaseEdges: Edge[] = []
+  // First pass: count edges per role for centered label positioning
+  const roleEdgeCounts = new Map<string, number>()
   for (const [roleName, dbMap] of roleDbGrants) {
     const roleNodeId = `role-${roleName}`
     const roleNodeExists = allRoleNodes.some(n => n.id === roleNodeId)
     if (!roleNodeExists) continue
+
+    let count = 0
+    for (const [dbName, data] of dbMap) {
+      const dbNodeId = `db-${dbName}`
+      const dbNodeExists = databaseNodes.some(n => n.id === dbNodeId)
+      if (!dbNodeExists) continue
+
+      const schemaCount = data.schemas.size
+      const hasDbGrants = data.dbPrivileges.size > 0
+      if (schemaCount > 0 || hasDbGrants) count++
+    }
+    roleEdgeCounts.set(roleName, count)
+  }
+
+  // Second pass: create edges with index and total count for centered labels
+  const roleEdgeIndex = new Map<string, number>()
+  const roleToDatabaseEdges: Edge[] = []
+
+  for (const [roleName, dbMap] of roleDbGrants) {
+    const roleNodeId = `role-${roleName}`
+    const roleNode = allRoleNodes.find(n => n.id === roleNodeId)
+    if (!roleNode) continue
+
+    const totalEdges = roleEdgeCounts.get(roleName) || 0
 
     for (const [dbName, data] of dbMap) {
       const dbNodeId = `db-${dbName}`
@@ -328,6 +373,10 @@ function buildCanvasLayout(
 
       // Only create edge if there are actual grants
       if (schemaCount > 0 || hasDbGrants) {
+        // Get edge index for this role (for vertical stacking of labels)
+        const edgeIndex = roleEdgeIndex.get(roleName) || 0
+        roleEdgeIndex.set(roleName, edgeIndex + 1)
+
         roleToDatabaseEdges.push({
           id: `role-db-edge-${roleName}-${dbName}`,
           source: roleNodeId,
@@ -337,6 +386,8 @@ function buildCanvasLayout(
             schemaCount,
             hasDbGrants,
             dbPrivileges: Array.from(data.dbPrivileges),
+            edgeIndex,                    // For vertical label stacking
+            totalEdges,                   // Total edges for this role (for centering)
           },
           style: { stroke: '#06b6d4', strokeWidth: 2 },
           animated: true,

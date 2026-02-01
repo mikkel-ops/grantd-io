@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import { Node } from '@xyflow/react'
 import { api } from '@/lib/api'
 
@@ -33,17 +33,26 @@ export function useDatabaseExpansion(
   const schemaCache = useRef<DatabaseSchemas>({})
   // Store the original Y positions before any expansion
   const originalYPositions = useRef<Map<string, number>>(new Map())
+  // Ref to always have the current expanded database value (avoids stale closures)
+  const expandedDatabaseRef = useRef<string | null>(null)
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    expandedDatabaseRef.current = expandedDatabase
+  }, [expandedDatabase])
 
   const expandDatabase = useCallback(async (
     databaseName: string,
     connectionId: string,
     token: string
   ) => {
-    // Don't re-expand same database
-    if (expandedDatabase === databaseName) return
+    // Don't re-expand same database (use ref to avoid stale closure)
+    if (expandedDatabaseRef.current === databaseName) return
 
     setIsLoading(true)
+    // Update both state and ref synchronously
     setExpandedDatabase(databaseName)
+    expandedDatabaseRef.current = databaseName
 
     try {
       // Check cache first
@@ -161,11 +170,13 @@ export function useDatabaseExpansion(
     } finally {
       setIsLoading(false)
     }
-  }, [expandedDatabase, setNodes])
+  }, [setNodes])
 
   const collapseDatabase = useCallback(() => {
-    const prevExpanded = expandedDatabase
+    const prevExpanded = expandedDatabaseRef.current
+    // Update both state and ref synchronously
     setExpandedDatabase(null)
+    expandedDatabaseRef.current = null
 
     // Remove schema nodes and restore original database positions
     setNodes(nds => {
@@ -201,26 +212,30 @@ export function useDatabaseExpansion(
           return n
         })
     })
-  }, [expandedDatabase, setNodes])
+  }, [setNodes])
 
   // Toggle function for click-based expand/collapse
+  // Uses ref to avoid stale closure issues with expandedDatabase
   const toggleDatabase = useCallback(async (
     databaseName: string,
     connectionId: string,
     token: string
   ) => {
-    if (expandedDatabase === databaseName) {
+    // Use ref to get current value (avoids stale closure)
+    const currentExpanded = expandedDatabaseRef.current
+
+    if (currentExpanded === databaseName) {
       collapseDatabase()
     } else {
       // If another database is expanded, collapse it first
-      if (expandedDatabase) {
+      if (currentExpanded) {
         collapseDatabase()
         // Small delay to let the collapse complete
         await new Promise(resolve => setTimeout(resolve, 50))
       }
       await expandDatabase(databaseName, connectionId, token)
     }
-  }, [expandedDatabase, expandDatabase, collapseDatabase])
+  }, [expandDatabase, collapseDatabase])
 
   return {
     expandedDatabase,

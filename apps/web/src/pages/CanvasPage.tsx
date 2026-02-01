@@ -210,6 +210,9 @@ export default function CanvasPage() {
     if (!focusedNodeId) {
       // Check if we should skip the visual reset (after a successful connection)
       const shouldSkipReset = skipCollapseOnFocusClear.current
+      // Check if focus was actually cleared (transitioning from focused to unfocused)
+      // vs. never having been focused in the first place
+      const focusWasCleared = prevFocusedNodeIdRef.current !== null
 
       // Clear all fading when no node is focused
       setNodes(nds => nds.map(node => ({
@@ -229,12 +232,15 @@ export default function CanvasPage() {
         },
       })))
 
-      // Collapse any expanded database when focus is cleared, unless we just made a connection
-      if (expandedDatabase && !shouldSkipReset) {
+      // Collapse any expanded database ONLY when focus is actually cleared
+      // (not when focus was never set, e.g., clicking directly on a database)
+      if (expandedDatabase && !shouldSkipReset && focusWasCleared) {
         collapseDatabase()
       }
       // Reset the skip flag after checking it
       skipCollapseOnFocusClear.current = false
+      // Update prev ref
+      prevFocusedNodeIdRef.current = focusedNodeId
       return
     }
 
@@ -357,6 +363,9 @@ export default function CanvasPage() {
         }
       }, 50)
     }
+
+    // Update prev ref when focused
+    prevFocusedNodeIdRef.current = focusedNodeId
   }, [focusedNodeId, focusedRole, focusedRoleGrants, setNodes, setEdges, connectionId, getToken, expandDatabase, expandedDatabase, collapseDatabase, connectionTargetDb])
 
   // Track connection drag state
@@ -364,6 +373,8 @@ export default function CanvasPage() {
   const connectionMadeToDatabase = useRef<string | null>(null)
   // Track if we should skip collapse when clearing focus (after successful connection)
   const skipCollapseOnFocusClear = useRef<boolean>(false)
+  // Track previous focusedNodeId to detect when focus is cleared (vs never focused)
+  const prevFocusedNodeIdRef = useRef<string | null>(null)
 
   // Handle connection start - detect when dragging from a role
   // Also activate focus mode to show lineage and allow schema-level targeting

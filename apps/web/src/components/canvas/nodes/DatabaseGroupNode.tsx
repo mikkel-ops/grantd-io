@@ -1,6 +1,6 @@
 // import { memo } from 'react'  // Temporarily commented out for debugging
 import { Handle, Position, NodeProps } from '@xyflow/react'
-import { Database, Folder, Key } from 'lucide-react'
+import { Database, Folder, Key, ChevronRight, ChevronDown } from 'lucide-react'
 
 export interface SchemaData {
   name: string
@@ -119,19 +119,26 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
       } ${nodeData.isFaded ? 'opacity-20' : ''}`}
       style={borderStyle}
     >
-      {/* Main target handle - large invisible hit area for easier connections */}
+      {/* Main target handle - positioned at node edge for accurate edge connection */}
       <Handle
         type="target"
         position={Position.Left}
         id={`${id}-db`}
-        className="!w-10 !h-full !bg-transparent !border-0 !rounded-none !transform-none !top-0 !-left-5"
+        className={`!w-3 !h-3 !rounded-full !border-0 ${hasHighlights ? '!bg-green-500' : '!bg-cyan-500'}`}
+        style={{ left: -6, top: 24 }}
       />
-      {/* Visual dot for main database target */}
-      <div className={`absolute left-0 top-6 -translate-x-1/2 w-3 h-3 rounded-full pointer-events-none ${hasHighlights ? 'bg-green-500' : 'bg-cyan-500'}`} />
 
-      {/* Main database header - always visible */}
+      {/* Main database header - always visible, click to expand/collapse */}
       <div className="px-4 py-3">
         <div className="flex items-center gap-2">
+          {/* Chevron indicator for expand/collapse */}
+          <div className="flex-shrink-0 text-gray-400">
+            {isExpanded ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+          </div>
           <div className={`rounded-full p-1.5 flex-shrink-0 ${hasHighlights ? 'bg-green-100' : 'bg-cyan-100'}`}>
             <Database className={`h-4 w-4 ${hasHighlights ? 'text-green-600' : 'text-cyan-600'}`} />
           </div>
@@ -179,6 +186,12 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
           <div className="text-[10px] text-cyan-500 uppercase tracking-wide px-2 py-1 font-medium">
             Database Privileges
           </div>
+          {/* Helper text when no role is focused */}
+          {!nodeData.focusedRole && (
+            <div className="text-[9px] text-gray-400 italic px-2 pb-1">
+              Click a role to edit privileges
+            </div>
+          )}
           <div className="flex flex-wrap gap-1 px-2 pb-2">
             {DB_PRIVILEGES.map((priv) => {
               const isGranted = nodeData.highlightedDbPrivileges?.includes(priv)
@@ -189,6 +202,8 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
               const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
               const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
               const canClick = canToggle || canRemovePending
+              // Muted styling when no role is focused
+              const isMuted = !nodeData.focusedRole && !isGranted && !isPendingGrant && !isPendingRevoke
 
               return (
                 <div key={priv} className="relative">
@@ -196,7 +211,7 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                     type="target"
                     position={Position.Left}
                     id={`db-priv-${priv}`}
-                    className={`w-2 h-2 !left-[-4px] ${isGranted || isPendingGrant ? '!bg-green-500' : '!bg-cyan-400'}`}
+                    className={`w-2 h-2 !left-[-4px] ${isGranted || isPendingGrant ? '!bg-green-500' : isMuted ? '!bg-gray-300' : '!bg-cyan-400'}`}
                   />
                   <span
                     onClick={() => canClick && handlePrivilegeClick(priv, 'DATABASE', !!isGranted)}
@@ -211,6 +226,8 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                         ? 'bg-green-100 text-green-700 border-green-300 font-medium'
                         : canToggle
                         ? 'bg-cyan-50 text-cyan-600 border-cyan-200 hover:border-green-400 hover:bg-green-50 hover:text-green-600'
+                        : isMuted
+                        ? 'bg-gray-50 text-gray-400 border-gray-200'
                         : 'bg-cyan-50 text-cyan-600 border-cyan-200'
                     }`}
                   >
@@ -222,13 +239,17 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
           </div>
 
           {/* Schemas section */}
-          <div className="text-[10px] text-cyan-500 uppercase tracking-wide px-2 py-1 font-medium border-t border-cyan-100">
+          <div className={`text-[10px] uppercase tracking-wide px-2 py-1 font-medium border-t border-cyan-100 ${
+            nodeData.focusedRole ? 'text-cyan-500' : 'text-gray-400'
+          }`}>
             Schemas
           </div>
           <div className="space-y-1">
             {nodeData.schemas.map((schema) => {
               const schemaPrivileges = schemaGrantsMap.get(schema.name)
               const hasSchemaGrants = schemaPrivileges && schemaPrivileges.length > 0
+              // Muted styling when no role is focused and no grants
+              const isSchemaCardMuted = !nodeData.focusedRole && !hasSchemaGrants
 
               return (
                 <div
@@ -236,15 +257,23 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                   className={`relative mx-1 px-3 py-2 rounded bg-white transition-colors ${
                     hasSchemaGrants
                       ? 'border-2 border-green-400 bg-green-50'
+                      : isSchemaCardMuted
+                      ? 'border border-gray-200'
                       : 'border border-cyan-200 hover:border-cyan-400'
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <div className={`rounded-full p-1 ${hasSchemaGrants ? 'bg-green-100' : 'bg-cyan-50'}`}>
-                      <Folder className={`h-3 w-3 ${hasSchemaGrants ? 'text-green-600' : 'text-cyan-500'}`} />
+                    <div className={`rounded-full p-1 ${
+                      hasSchemaGrants ? 'bg-green-100' : isSchemaCardMuted ? 'bg-gray-100' : 'bg-cyan-50'
+                    }`}>
+                      <Folder className={`h-3 w-3 ${
+                        hasSchemaGrants ? 'text-green-600' : isSchemaCardMuted ? 'text-gray-400' : 'text-cyan-500'
+                      }`} />
                     </div>
                     <div className="flex-1">
-                      <div className={`text-xs font-medium ${hasSchemaGrants ? 'text-green-700' : 'text-cyan-700'}`}>
+                      <div className={`text-xs font-medium ${
+                        hasSchemaGrants ? 'text-green-700' : isSchemaCardMuted ? 'text-gray-500' : 'text-cyan-700'
+                      }`}>
                         {schema.name}
                       </div>
                       {/* Show available schema privileges as connection targets */}
@@ -258,6 +287,8 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                           const canToggle = !!nodeData.focusedRole && !!nodeData.onPrivilegeToggle
                           const canRemovePending = !!pendingChange && !!nodeData.onRemovePendingChange
                           const canClick = canToggle || canRemovePending
+                          // Muted styling when no role is focused
+                          const isMuted = !nodeData.focusedRole && !isGranted && !isPendingGrant && !isPendingRevoke
 
                           return (
                             <div key={priv} className="relative">
@@ -265,7 +296,7 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
                                 type="target"
                                 position={Position.Left}
                                 id={`schema-${schema.name}-priv-${priv}`}
-                                className={`w-1.5 h-1.5 !left-[-3px] ${isGranted || isPendingGrant ? '!bg-green-500' : '!bg-cyan-300'}`}
+                                className={`w-1.5 h-1.5 !left-[-3px] ${isGranted || isPendingGrant ? '!bg-green-500' : isMuted ? '!bg-gray-300' : '!bg-cyan-300'}`}
                               />
                               <span
                                 onClick={() => canClick && handlePrivilegeClick(priv, 'SCHEMA', !!isGranted, schema.name)}
