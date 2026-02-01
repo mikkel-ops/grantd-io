@@ -340,6 +340,7 @@ function buildCanvasLayout(
           },
           style: { stroke: '#06b6d4', strokeWidth: 2 },
           animated: true,
+          interactionWidth: 20,  // Larger clickable area
         })
       }
     }

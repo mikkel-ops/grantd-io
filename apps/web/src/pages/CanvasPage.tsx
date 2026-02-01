@@ -97,6 +97,7 @@ export default function CanvasPage() {
     addCreateRole,
     addGrantPrivilege,
     addInheritRole,
+    addRevokeDbAccess,
     togglePrivilege,
     removePendingChange,
     clearAllChanges,
@@ -597,30 +598,48 @@ export default function CanvasPage() {
   // Handle edge clicks (for revokes)
   const onEdgeClick = useCallback(
     (_event: React.MouseEvent, edge: Edge) => {
-      // Skip pending/role-to-role edges
+      // Skip pending/role-to-role inheritance edges
       if (edge.id.startsWith('pending-') || edge.id.startsWith('role-edge-')) {
         return
       }
 
-      // Clicking revoked edge restores it
-      if (edge.id.startsWith('revoke-')) {
+      // Clicking revoked user-role edge restores it
+      if (edge.id.startsWith('revoke-') && !edge.id.startsWith('revoke-db-edge-')) {
         const changeId = edge.id.replace('revoke-', '')
         removePendingChange(changeId, 'revoke_role')
         return
       }
 
-      // Extract user and role from edge
-      const { source, target } = edge
-      if (!source?.startsWith('user-') || !target?.startsWith('role-')) {
+      // Clicking revoked role-db edge restores it
+      if (edge.id.startsWith('revoke-db-edge-')) {
+        const parts = edge.id.replace('revoke-db-edge-', '').split('-')
+        const roleName = parts[0]
+        const databaseName = parts.slice(1).join('-')
+        removePendingChange(`revoke-db-${roleName}-${databaseName}`, 'revoke_db_access')
         return
       }
 
-      const userName = source.replace('user-', '')
-      const roleName = target.replace('role-', '')
+      // User to Role edge - revoke role assignment
+      const { source, target } = edge
+      if (source?.startsWith('user-') && target?.startsWith('role-')) {
+        const userName = source.replace('user-', '')
+        const roleName = target.replace('role-', '')
+        addRevokeRole(userName, roleName, edge.id)
+        return
+      }
 
-      addRevokeRole(userName, roleName, edge.id)
+      // Role to Database edge - revoke database access
+      if (edge.id.startsWith('role-db-edge-')) {
+        const parts = edge.id.replace('role-db-edge-', '').split('-')
+        const roleName = parts[0]
+        const databaseName = parts.slice(1).join('-')
+        if (roleName && databaseName) {
+          addRevokeDbAccess(roleName, databaseName, edge.id)
+        }
+        return
+      }
     },
-    [removePendingChange, addRevokeRole]
+    [removePendingChange, addRevokeRole, addRevokeDbAccess]
   )
 
   // Handle user creation
@@ -729,6 +748,17 @@ export default function CanvasPage() {
             details: {
               parent_role: change.parentRoleName,
               child_role: change.childRoleName,
+            },
+          }]
+        } else if (change.type === 'revoke_db_access' && change.roleName && change.databaseName) {
+          // Revoke all database access for a role
+          return [{
+            change_type: 'revoke',
+            object_type: 'database_access',
+            object_name: `${change.roleName} -> ${change.databaseName}`,
+            details: {
+              role_name: change.roleName,
+              database_name: change.databaseName,
             },
           }]
         } else {
@@ -868,6 +898,7 @@ function buildChangesetTitle(changes: PendingChange[]): string {
     0
   )
   const revokePrivilegeCount = changes.filter(c => c.type === 'revoke_privilege').length
+  const revokeDbAccessCount = changes.filter(c => c.type === 'revoke_db_access').length
 
   const parts = []
   if (createUserCount > 0) parts.push(`${createUserCount} new user${createUserCount > 1 ? 's' : ''}`)
@@ -877,6 +908,7 @@ function buildChangesetTitle(changes: PendingChange[]): string {
   if (inheritRoleCount > 0) parts.push(`${inheritRoleCount} role inheritance${inheritRoleCount > 1 ? 's' : ''}`)
   if (grantPrivilegeCount > 0) parts.push(`${grantPrivilegeCount} privilege grant${grantPrivilegeCount > 1 ? 's' : ''}`)
   if (revokePrivilegeCount > 0) parts.push(`${revokePrivilegeCount} privilege revoke${revokePrivilegeCount > 1 ? 's' : ''}`)
+  if (revokeDbAccessCount > 0) parts.push(`${revokeDbAccessCount} database access revoke${revokeDbAccessCount > 1 ? 's' : ''}`)
 
   return `Access Canvas changes (${parts.join(', ')})`
 }

@@ -49,6 +49,15 @@ function GrantEdge({
 
   return (
     <>
+      {/* Invisible interaction path for easier clicking */}
+      <path
+        d={edgePath}
+        fill="none"
+        stroke="transparent"
+        strokeWidth={20}
+        className="react-flow__edge-interaction"
+      />
+      {/* Visible edge path */}
       <path
         id={id}
         className="react-flow__edge-path"

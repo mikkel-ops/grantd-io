@@ -142,6 +142,7 @@ export function useDatabaseFocus(
               hasDbGrants,
               dbPrivileges: Array.from(data.dbPrivileges),
             },
+            interactionWidth: 20,  // Larger clickable area
             style: { stroke: '#06b6d4', strokeWidth: 2 },
             animated: true,
           })

@@ -84,7 +84,8 @@ function PendingChangeItem({
 }) {
   const isRevokeRole = change.type === 'revoke_role'
   const isRevokePrivilege = change.type === 'revoke_privilege'
-  const isRevoke = isRevokeRole || isRevokePrivilege
+  const isRevokeDbAccess = change.type === 'revoke_db_access'
+  const isRevoke = isRevokeRole || isRevokePrivilege || isRevokeDbAccess
   const isCreateUser = change.type === 'create_user'
   const isCreateRole = change.type === 'create_role'
   const isGrantPrivilege = change.type === 'grant_privilege'
@@ -152,6 +153,19 @@ function PendingChangeItem({
             </div>
             <div className="text-xs text-muted-foreground">
               Role inheritance
+            </div>
+          </>
+        ) : isRevokeDbAccess ? (
+          <>
+            <div className="flex items-center gap-1">
+              <Shield className="h-3 w-3 text-red-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.roleName}</span>
+              <ArrowRight className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+              <Database className="h-3 w-3 text-red-600 flex-shrink-0" />
+              <span className="font-medium truncate">{change.databaseName}</span>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Revoke all database access
             </div>
           </>
         ) : (

@@ -6,7 +6,7 @@ import { LAYOUT } from './useCanvasData'
 
 export interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege' | 'inherit_role'
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege' | 'inherit_role' | 'revoke_db_access'
   userName?: string
   roleName?: string
   parentRoleName?: string  // For inherit_role: the role being inherited from
@@ -27,6 +27,7 @@ interface UsePendingChangesResult {
   addCreateRole: (roleName: string, inheritedRoles: string[], assignedUsers: string[], roleType?: 'business' | 'functional') => void
   addGrantPrivilege: (roleName: string, databaseName: string, grants: PrivilegeGrant[]) => void
   addInheritRole: (parentRoleName: string, childRoleName: string) => void
+  addRevokeDbAccess: (roleName: string, databaseName: string, edgeId: string) => void
   togglePrivilege: (roleName: string, databaseName: string, privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string, isCurrentlyGranted?: boolean) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
@@ -195,6 +196,39 @@ export function usePendingChanges(
       ]
     })
   }, [setEdges])
+
+  // Revoke all database access for a role (clicking on role-db edge)
+  const addRevokeDbAccess = useCallback((roleName: string, databaseName: string, edgeId: string) => {
+    const changeId = `revoke-db-${roleName}-${databaseName}`
+
+    // Check if already pending
+    if (pendingChanges.some(c => c.id === changeId && c.type === 'revoke_db_access')) {
+      return
+    }
+
+    // Update edge to revoke style (red dashed)
+    setEdges(eds => eds.map(e => {
+      if (e.id === edgeId) {
+        return {
+          ...e,
+          id: `revoke-db-edge-${roleName}-${databaseName}`,
+          style: { stroke: '#ef4444', strokeDasharray: '5,5', strokeWidth: 2 },
+          animated: true,
+        }
+      }
+      return e
+    }))
+
+    setPendingChanges(prev => [
+      ...prev,
+      {
+        id: changeId,
+        type: 'revoke_db_access',
+        roleName,
+        databaseName,
+      },
+    ])
+  }, [pendingChanges, setEdges])
 
   const addGrantPrivilege = useCallback((roleName: string, databaseName: string, grants: PrivilegeGrant[]) => {
     // Build the pending privilege changes that will be added
@@ -449,6 +483,25 @@ export function usePendingChanges(
         const childRoleName = parts.slice(2).join('-')
         setEdges(eds => eds.filter(e => e.id !== `pending-inherit-${parentRoleName}-${childRoleName}`))
       }
+    } else if (changeType === 'revoke_db_access') {
+      // Restore the role-db edge back to normal
+      // changeId format: revoke-db-{roleName}-{databaseName}
+      const parts = changeId.split('-')
+      if (parts.length >= 4 && parts[0] === 'revoke' && parts[1] === 'db') {
+        const roleName = parts[2]
+        const databaseName = parts.slice(3).join('-')
+        setEdges(eds => eds.map(e => {
+          if (e.id === `revoke-db-edge-${roleName}-${databaseName}`) {
+            return {
+              ...e,
+              id: `role-db-edge-${roleName}-${databaseName}`,
+              style: { stroke: '#06b6d4', strokeWidth: 2 },
+              animated: true,
+            }
+          }
+          return e
+        }))
+      }
     }
   }, [setEdges, setNodes])
 
@@ -461,11 +514,24 @@ export function usePendingChanges(
         !e.id.startsWith('pending-inherit-')
       )
       return filtered.map(e => {
-        if (e.id.startsWith('revoke-')) {
+        // Restore user-role revoke edges
+        if (e.id.startsWith('revoke-') && !e.id.startsWith('revoke-db-edge-')) {
           return {
             ...e,
             id: `edge-restored-${e.id.replace('revoke-', '')}`,
             style: { stroke: '#3b82f6' },
+            animated: true,
+          }
+        }
+        // Restore role-db revoke edges
+        if (e.id.startsWith('revoke-db-edge-')) {
+          const parts = e.id.replace('revoke-db-edge-', '').split('-')
+          const roleName = parts[0]
+          const databaseName = parts.slice(1).join('-')
+          return {
+            ...e,
+            id: `role-db-edge-${roleName}-${databaseName}`,
+            style: { stroke: '#06b6d4', strokeWidth: 2 },
             animated: true,
           }
         }
@@ -498,6 +564,7 @@ export function usePendingChanges(
     addCreateRole,
     addGrantPrivilege,
     addInheritRole,
+    addRevokeDbAccess,
     togglePrivilege,
     removePendingChange,
     clearAllChanges,
