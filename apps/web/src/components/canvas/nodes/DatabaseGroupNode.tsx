@@ -67,20 +67,24 @@ function DatabaseGroupNode({ data, id }: NodeProps) {
       schemaGrantsMap.set(sg.name, sg.privileges)
     }
   }
-  // Highlight the database if it has existing grants OR pending grants OR is a connection target
-  const hasPendingGrants = nodeData.pendingPrivilegeChanges && nodeData.pendingPrivilegeChanges.some(p => p.changeType === 'grant')
+  // Highlight the database if it has existing grants OR pending grants for the focused role OR is a connection target
+  const hasPendingGrantsForFocusedRole = nodeData.pendingPrivilegeChanges && nodeData.pendingPrivilegeChanges.some(
+    p => p.changeType === 'grant' && (!nodeData.focusedRole || p.roleName === nodeData.focusedRole)
+  )
   const hasHighlights = (nodeData.highlightedDbPrivileges && nodeData.highlightedDbPrivileges.length > 0) ||
                         (nodeData.highlightedSchemas && nodeData.highlightedSchemas.length > 0) ||
-                        hasPendingGrants ||
+                        hasPendingGrantsForFocusedRole ||
                         nodeData.isConnectionTarget
 
-  // Helper to check if a privilege has a pending change
+  // Helper to check if a privilege has a pending change FOR THE FOCUSED ROLE
   const getPendingChange = (privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string) => {
     if (!nodeData.pendingPrivilegeChanges) return null
+    // Only show pending changes for the currently focused role
     return nodeData.pendingPrivilegeChanges.find(
       p => p.privilege === privilege &&
            p.objectType === objectType &&
-           (objectType === 'DATABASE' || p.schemaName === schemaName)
+           (objectType === 'DATABASE' || p.schemaName === schemaName) &&
+           (!nodeData.focusedRole || p.roleName === nodeData.focusedRole)
     )
   }
 

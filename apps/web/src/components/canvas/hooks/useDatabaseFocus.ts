@@ -44,7 +44,18 @@ export function useDatabaseFocus(
     if (focusedRole === roleName) {
       setFocusedRole(null)
       setFocusedRoleGrants(new Map())
-      setEdges(baseEdgesRef.current)
+      // Preserve pending edges and restore all base edges when clearing focus
+      setEdges(currentEdges => {
+        const pendingEdges = currentEdges.filter(e =>
+          e.id.startsWith('pending-') ||
+          e.id.startsWith('privilege-edge-') ||
+          e.id.startsWith('revoke-') ||
+          e.id.startsWith('pending-inherit-') ||
+          e.id.startsWith('role-edge-new-')
+        )
+        // Restore ALL base edges including role-db-edge-* (initial role-to-database connections)
+        return [...baseEdgesRef.current, ...pendingEdges]
+      })
       return
     }
 
@@ -139,10 +150,22 @@ export function useDatabaseFocus(
 
       console.log('Created edges:', dbEdges.length)
 
-      // Update edges: filter out all other role-db edges, keep only base edges and the focused role's edges
-      // This ensures only the focused role's database connections are visible
-      const filteredBaseEdges = baseEdgesRef.current.filter(e => !e.id.startsWith('role-db-edge-'))
-      setEdges([...filteredBaseEdges, ...dbEdges])
+      // Update edges: keep ALL base edges, pending edges, and add focus-specific edges
+      // The focus edges may duplicate some base edges (same IDs), which is fine
+      setEdges(currentEdges => {
+        // Keep pending edges (these should persist across focus changes)
+        const pendingEdges = currentEdges.filter(e =>
+          e.id.startsWith('pending-') ||
+          e.id.startsWith('privilege-edge-') ||
+          e.id.startsWith('revoke-') ||
+          e.id.startsWith('pending-inherit-') ||
+          e.id.startsWith('role-edge-new-')  // Edges for newly created roles
+        )
+
+        // Keep ALL base edges (including initial role-db-edge-* edges)
+        // The dbEdges for the focused role may have the same IDs, which will update them
+        return [...baseEdgesRef.current, ...pendingEdges, ...dbEdges]
+      })
     } catch (error) {
       console.error('Failed to fetch role grants:', error)
     }
@@ -151,12 +174,18 @@ export function useDatabaseFocus(
   const clearFocus = useCallback(() => {
     setFocusedRole(null)
     setFocusedRoleGrants(new Map())
-    // Remove only the focus-specific edges (role-db-edge-*), preserve everything else
-    // This ensures pending edges (privilege-edge-*, pending-*, revoke-*) are not lost
+    // Restore ALL base edges and preserve pending edges when clearing focus
     setEdges(currentEdges => {
-      // Remove role-db-edge-* edges (these are only for focus visualization)
-      const filteredEdges = currentEdges.filter(e => !e.id.startsWith('role-db-edge-'))
-      return filteredEdges
+      // Keep pending edges (these should persist)
+      const pendingEdges = currentEdges.filter(e =>
+        e.id.startsWith('pending-') ||
+        e.id.startsWith('privilege-edge-') ||
+        e.id.startsWith('revoke-') ||
+        e.id.startsWith('pending-inherit-') ||
+        e.id.startsWith('role-edge-new-')
+      )
+      // Restore ALL base edges including role-db-edge-* (initial role-to-database connections)
+      return [...baseEdgesRef.current, ...pendingEdges]
     })
   }, [setEdges])
 
