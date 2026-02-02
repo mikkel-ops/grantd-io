@@ -6,7 +6,7 @@ import { LAYOUT } from './useCanvasData'
 
 export interface PendingChange {
   id: string
-  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege' | 'inherit_role' | 'revoke_db_access'
+  type: 'grant_role' | 'revoke_role' | 'create_user' | 'create_role' | 'grant_privilege' | 'revoke_privilege' | 'inherit_role' | 'revoke_db_access' | 'drop_user' | 'drop_role'
   userName?: string
   roleName?: string
   parentRoleName?: string  // For inherit_role: the role being inherited from
@@ -29,6 +29,8 @@ interface UsePendingChangesResult {
   addInheritRole: (parentRoleName: string, childRoleName: string) => void
   addRevokeDbAccess: (roleName: string, databaseName: string, edgeId: string) => void
   togglePrivilege: (roleName: string, databaseName: string, privilege: string, objectType: 'DATABASE' | 'SCHEMA', schemaName?: string, isCurrentlyGranted?: boolean) => void
+  addDropUser: (userName: string) => void
+  addDropRole: (roleName: string) => void
   removePendingChange: (changeId: string, changeType: PendingChange['type']) => void
   clearAllChanges: () => void
   cancelRevoke: (changeId: string) => void
@@ -414,6 +416,68 @@ export function usePendingChanges(
     }))
   }, [setNodes])
 
+  // Toggle drop user pending change
+  const addDropUser = useCallback((userName: string) => {
+    console.log('[addDropUser] Called with userName:', userName)
+    const changeId = `drop-user-${userName}`
+
+    setPendingChanges(prev => {
+      console.log('[addDropUser] Current pending changes:', prev)
+      // Toggle: if already exists, remove it
+      const existing = prev.find(c => c.id === changeId)
+      if (existing) {
+        return prev.filter(c => c.id !== changeId)
+      }
+      return [...prev, { id: changeId, type: 'drop_user' as const, userName }]
+    })
+
+    // Update node styling to show pending delete state
+    setNodes(nds => nds.map(n => {
+      if (n.id === `user-${userName}`) {
+        const currentPendingDelete = (n.data as { isPendingDelete?: boolean }).isPendingDelete
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            isPendingDelete: !currentPendingDelete,
+          },
+        }
+      }
+      return n
+    }))
+  }, [setNodes])
+
+  // Toggle drop role pending change
+  const addDropRole = useCallback((roleName: string) => {
+    console.log('[addDropRole] Called with roleName:', roleName)
+    const changeId = `drop-role-${roleName}`
+
+    setPendingChanges(prev => {
+      console.log('[addDropRole] Current pending changes:', prev)
+      // Toggle: if already exists, remove it
+      const existing = prev.find(c => c.id === changeId)
+      if (existing) {
+        return prev.filter(c => c.id !== changeId)
+      }
+      return [...prev, { id: changeId, type: 'drop_role' as const, roleName }]
+    })
+
+    // Update node styling to show pending delete state
+    setNodes(nds => nds.map(n => {
+      if (n.id === `role-${roleName}`) {
+        const currentPendingDelete = (n.data as { isPendingDelete?: boolean }).isPendingDelete
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            isPendingDelete: !currentPendingDelete,
+          },
+        }
+      }
+      return n
+    }))
+  }, [setNodes])
+
   const removePendingChange = useCallback((changeId: string, changeType: PendingChange['type']) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
 
@@ -502,6 +566,38 @@ export function usePendingChanges(
           return e
         }))
       }
+    } else if (changeType === 'drop_user') {
+      // Remove pending delete state from user node
+      // changeId format: drop-user-{userName}
+      const userName = changeId.replace('drop-user-', '')
+      setNodes(nds => nds.map(n => {
+        if (n.id === `user-${userName}`) {
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              isPendingDelete: false,
+            },
+          }
+        }
+        return n
+      }))
+    } else if (changeType === 'drop_role') {
+      // Remove pending delete state from role node
+      // changeId format: drop-role-{roleName}
+      const roleName = changeId.replace('drop-role-', '')
+      setNodes(nds => nds.map(n => {
+        if (n.id === `role-${roleName}`) {
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              isPendingDelete: false,
+            },
+          }
+        }
+        return n
+      }))
     }
   }, [setEdges, setNodes])
 
@@ -538,8 +634,24 @@ export function usePendingChanges(
         return e
       })
     })
+    // Clear pending delete state from all user and role nodes
+    setNodes(nds => nds.map(n => {
+      if (n.id.startsWith('user-') || n.id.startsWith('role-')) {
+        const data = n.data as { isPendingDelete?: boolean }
+        if (data.isPendingDelete) {
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              isPendingDelete: false,
+            },
+          }
+        }
+      }
+      return n
+    }))
     setPendingChanges([])
-  }, [setEdges])
+  }, [setEdges, setNodes])
 
   const cancelRevoke = useCallback((changeId: string) => {
     setPendingChanges(prev => prev.filter(c => c.id !== changeId))
@@ -566,6 +678,8 @@ export function usePendingChanges(
     addInheritRole,
     addRevokeDbAccess,
     togglePrivilege,
+    addDropUser,
+    addDropRole,
     removePendingChange,
     clearAllChanges,
     cancelRevoke,

@@ -68,6 +68,8 @@ export default function CanvasPage() {
   // Track if canvas has been initialized to prevent re-initialization from wiping state
   const hasInitialized = useRef(false)
   const previousConnectionId = useRef<string | null>(null)
+  // State to trigger callback setup after initialization (refs don't trigger re-renders)
+  const [isCanvasReady, setIsCanvasReady] = useState(false)
 
   // Initialize canvas when data loads - ONLY ONCE per connection
   useEffect(() => {
@@ -85,6 +87,7 @@ export default function CanvasPage() {
       setBaseNodes(initialNodes)
       setBaseEdges(initialEdges)
       hasInitialized.current = true
+      setIsCanvasReady(true)
     }
   }, [initialNodes, initialEdges, setNodes, setEdges, connectionId])
 
@@ -99,6 +102,8 @@ export default function CanvasPage() {
     addInheritRole,
     addRevokeDbAccess,
     togglePrivilege,
+    addDropUser,
+    addDropRole,
     removePendingChange,
     clearAllChanges,
   } = usePendingChanges(nodes, setNodes, edges, setEdges)
@@ -162,14 +167,13 @@ export default function CanvasPage() {
     return map
   }, [pendingChanges])
 
-  // Update database nodes with grant highlights when a role is focused
-  // Also handles pending privilege changes display on database nodes
-  // Using useLayoutEffect to ensure this runs synchronously before paint,
-  // preventing race conditions with expandDatabase's setNodes call
+  // Update all node data: database highlights, user/role delete callbacks
+  // Combined into a single effect to avoid race conditions with multiple setNodes calls
+  // Using useLayoutEffect to ensure this runs synchronously before paint
   useLayoutEffect(() => {
-    // Always update database nodes with pending changes, regardless of focus state
+    console.log('[useLayoutEffect] Setting up node callbacks, addDropUser type:', typeof addDropUser)
     setNodes(nds => nds.map(node => {
-      // Check both type and id prefix to catch databases during type transitions
+      // Database nodes: grant highlights and privilege callbacks
       if (node.type === 'databaseGroup' || node.type === 'database' || node.id.startsWith('db-')) {
         const dbName = node.id.replace('db-', '')
         const grantDetails = focusedRoleGrants.get(dbName)
@@ -192,9 +196,34 @@ export default function CanvasPage() {
           },
         }
       }
+
+      // User nodes: delete callback
+      if (node.id.startsWith('user-')) {
+        const userName = node.id.replace('user-', '')
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            onDeleteToggle: () => addDropUser(userName),
+          },
+        }
+      }
+
+      // Role nodes: delete callback
+      if (node.id.startsWith('role-')) {
+        const roleName = node.id.replace('role-', '')
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            onDeleteToggle: () => addDropRole(roleName),
+          },
+        }
+      }
+
       return node
     }))
-  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb, expandedDatabase, connectionTargetDb])
+  }, [focusedRoleGrants, focusedRole, setNodes, handlePrivilegeToggle, handleRemovePendingChange, pendingPrivilegesByDb, expandedDatabase, connectionTargetDb, addDropUser, addDropRole, isCanvasReady])
 
   // Lineage focus state - track which node is focused
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null)

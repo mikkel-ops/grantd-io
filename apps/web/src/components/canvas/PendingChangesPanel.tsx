@@ -85,7 +85,11 @@ function PendingChangeItem({
   const isRevokeRole = change.type === 'revoke_role'
   const isRevokePrivilege = change.type === 'revoke_privilege'
   const isRevokeDbAccess = change.type === 'revoke_db_access'
+  const isDropUser = change.type === 'drop_user'
+  const isDropRole = change.type === 'drop_role'
+  const isDrop = isDropUser || isDropRole
   const isRevoke = isRevokeRole || isRevokePrivilege || isRevokeDbAccess
+  const isDestructive = isRevoke || isDrop
   const isCreateUser = change.type === 'create_user'
   const isCreateRole = change.type === 'create_role'
   const isGrantPrivilege = change.type === 'grant_privilege'
@@ -101,12 +105,12 @@ function PendingChangeItem({
   return (
     <div
       className={`flex items-center gap-2 p-2 rounded-lg text-sm ${
-        isRevoke ? 'bg-red-50 border border-red-200' :
+        isDestructive ? 'bg-red-50 border border-red-200' :
         isGrantPrivilege ? 'bg-green-50 border border-green-200' :
         'bg-green-50 border border-green-200'
       }`}
     >
-      {isRevoke ? (
+      {isDestructive ? (
         <Minus className="h-4 w-4 text-red-600 flex-shrink-0" />
       ) : isGrantPrivilege ? (
         <Plus className="h-4 w-4 text-green-600 flex-shrink-0" />
@@ -168,6 +172,22 @@ function PendingChangeItem({
               Revoke all database access
             </div>
           </>
+        ) : isDrop ? (
+          <>
+            <div className="flex items-center gap-1">
+              {isDropUser ? (
+                <User className="h-3 w-3 text-red-600 flex-shrink-0" />
+              ) : (
+                <Shield className="h-3 w-3 text-red-600 flex-shrink-0" />
+              )}
+              <span className="font-medium truncate text-red-700">
+                {isDropUser ? change.userName : change.roleName}
+              </span>
+            </div>
+            <div className="text-xs text-red-600">
+              {isDropUser ? 'Drop user' : 'Drop role'}
+            </div>
+          </>
         ) : (
           <>
             <div className="flex items-center gap-1">
@@ -184,7 +204,7 @@ function PendingChangeItem({
       <button
         onClick={onRemove}
         className={`p-1 rounded ${
-          isRevoke ? 'hover:bg-red-100 text-red-600' :
+          isDestructive ? 'hover:bg-red-100 text-red-600' :
           'hover:bg-green-100 text-green-600'
         }`}
       >
